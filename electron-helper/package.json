@@ -28,7 +28,8 @@
     "files": [
       "dist/**/*",
       "build/**/*",
-      "package.json"
+      "package.json",
+      ".env"
     ],
     "asar": true,
     "directories": {
@@ -41,11 +42,17 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["arm64", "x64"]
+          "arch": [
+            "arm64",
+            "x64"
+          ]
         },
         {
           "target": "zip",
-          "arch": ["arm64", "x64"]
+          "arch": [
+            "arm64",
+            "x64"
+          ]
         }
       ]
     },
