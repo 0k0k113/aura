@@ -31,7 +31,7 @@ jobs:
         run: npm ci
 
       - name: Create .env for build
-        # This file will be packaged into the app so it works on users' machines
+        shell: bash
         run: |
           cat > .env <<EOF
           DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID}
