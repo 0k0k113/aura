@@ -39,8 +39,14 @@
       "icon": "build/icon.png",
       "artifactName": "Unreleasd-Presence-${version}-${os}-${arch}.${ext}",
       "target": [
-        "dmg",
-        "zip"
+        {
+          "target": "dmg",
+          "arch": ["arm64", "x64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["arm64", "x64"]
+        }
       ]
     },
     "win": {
