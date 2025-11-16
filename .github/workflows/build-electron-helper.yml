@@ -8,11 +8,24 @@ on:
 
 jobs:
   build:
-    name: Build on ${{ matrix.os }}
+    name: Build ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
+
     strategy:
       matrix:
-        os: [macos-latest, windows-latest]
+        include:
+          - os: macos-latest
+            label: macOS arm64
+            build_cmd: npm run dist:mac -- --arm64
+            artifact_name: electron-helper-macos-arm64
+          - os: macos-latest
+            label: macOS Intel
+            build_cmd: npm run dist:mac -- --x64
+            artifact_name: electron-helper-macos-intel
+          - os: windows-latest
+            label: Windows (x64 + x86)
+            build_cmd: npm run dist:win
+            artifact_name: electron-helper-windows
 
     defaults:
       run:
@@ -45,11 +58,11 @@ jobs:
         env:
           DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
           ELECTRON_APP_URL: https://unreleasedworld.netlify.app
-        run: npm run build
+        run: ${{ matrix.build_cmd }}
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: electron-helper-${{ runner.os }}
+          name: ${{ matrix.artifact_name }}
           path: |
-            electron-helper/dist/**
+            dist/**
