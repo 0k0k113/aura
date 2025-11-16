@@ -64,5 +64,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: |
-            dist/**
+          # IMPORTANT: path is from repo root, *not* working-directory
+          path: electron-helper/dist/**
