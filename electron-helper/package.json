@@ -7,8 +7,12 @@
   "scripts": {
     "dev": "tsc && electron .",
     "build:app": "tsc",
-    "build": "npm run build:app && electron-builder --config builder.config.json",
-    "pack": "npm run build:app && electron-builder --config builder.config.json --dir",
+    "build": "npm run build:app && electron-builder",
+    "pack": "npm run build:app && electron-builder --dir",
+    "dist:mac": "npm run build:app && electron-builder --mac",
+    "dist:win": "npm run build:app && electron-builder --win --x64 --ia32",
+    "dist:linux": "npm run build:app && electron-builder --linux",
+    "dist:all": "npm run build:app && electron-builder -mwl",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
@@ -18,6 +22,51 @@
   ],
   "author": "Unreleasd",
   "license": "MIT",
+  "build": {
+    "appId": "world.unreleased.presence",
+    "productName": "Unreleased Presence",
+    "files": [
+      "dist/**/*",
+      "build/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "directories": {
+      "buildResources": "build"
+    },
+    "mac": {
+      "category": "public.app-category.music",
+      "icon": "build/icon.png",
+      "artifactName": "Unreleasd-Presence-${version}-${os}-${arch}.${ext}",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "artifactName": "Unreleasd-Presence-${version}-${os}-${arch}.${ext}",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "linux": {
+      "icon": "build",
+      "category": "AudioVideo",
+      "artifactName": "Unreleasd-Presence-${version}-${os}-${arch}.${ext}",
+      "target": [
+        "AppImage",
+        "deb",
+        "zip"
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false
+    }
+  },
   "devDependencies": {
     "@types/node": "^20.11.0",
     "electron": "^30.0.0",
