@@ -44,7 +44,7 @@
       ]
     },
     "win": {
-      "icon": "build/icon.ico",
+      "icon": "build/icon.png",
       "artifactName": "Unreleasd-Presence-${version}-${os}-${arch}.${ext}",
       "target": [
         "nsis",
