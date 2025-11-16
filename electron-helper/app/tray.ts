@@ -1,5 +1,5 @@
 // app/tray.ts
-import { app, Tray, Menu, BrowserWindow, nativeImage, Notification } from 'electron'
+import { Tray, Menu, BrowserWindow, nativeImage, Notification } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs'
 import { DiscordRPC } from './rpc'
@@ -14,28 +14,52 @@ function resolveFirstExisting(paths: string[]): string | null {
 }
 
 function loadTrayImage(): Electron.NativeImage {
-  // Prefer platform-appropriate tray assets from the packaged resources first, then local build/, then legacy assets/
+  // Prefer platform-appropriate tray assets from the packaged resources first,
+  // then the project-root build/, then legacy assets/
   const candidates: string[] = []
 
-  // Packaged resources path
+  // Packaged resources path (when built)
   const resBuild = path.join(process.resourcesPath, 'build')
   const resCandidates =
     process.platform === 'darwin'
-      ? [path.join(resBuild, 'trayTemplate.png'), path.join(resBuild, 'tray.png'), path.join(resBuild, 'icon.png')]
+      ? [
+          path.join(resBuild, 'trayTemplate.png'),
+          path.join(resBuild, 'tray.png'),
+          path.join(resBuild, 'icon.png')
+        ]
       : process.platform === 'win32'
-      ? [path.join(resBuild, 'tray.png'), path.join(resBuild, 'icon.png'), path.join(resBuild, 'icon.ico')]
-      : [path.join(resBuild, 'tray.png'), path.join(resBuild, 'icon.png')]
+      ? [
+          path.join(resBuild, 'tray.png'),
+          path.join(resBuild, 'icon.png'),
+          path.join(resBuild, 'icon.ico')
+        ]
+      : [
+          path.join(resBuild, 'tray.png'),
+          path.join(resBuild, 'icon.png')
+        ]
 
   candidates.push(...resCandidates)
 
-  // Dev build folder next to compiled files
-  const localBuild = path.join(__dirname, '../build')
+  // Dev build folder at project root (sibling to app/)
+  // dist/app/tray.js -> ../../build -> <projectRoot>/build
+  const localBuild = path.join(__dirname, '../../build')
   const devCandidates =
     process.platform === 'darwin'
-      ? [path.join(localBuild, 'trayTemplate.png'), path.join(localBuild, 'tray.png'), path.join(localBuild, 'icon.png')]
+      ? [
+          path.join(localBuild, 'trayTemplate.png'),
+          path.join(localBuild, 'tray.png'),
+          path.join(localBuild, 'icon.png')
+        ]
       : process.platform === 'win32'
-      ? [path.join(localBuild, 'tray.png'), path.join(localBuild, 'icon.png'), path.join(localBuild, 'icon.ico')]
-      : [path.join(localBuild, 'tray.png'), path.join(localBuild, 'icon.png')]
+      ? [
+          path.join(localBuild, 'tray.png'),
+          path.join(localBuild, 'icon.png'),
+          path.join(localBuild, 'icon.ico')
+        ]
+      : [
+          path.join(localBuild, 'tray.png'),
+          path.join(localBuild, 'icon.png')
+        ]
 
   candidates.push(...devCandidates)
 
@@ -124,7 +148,15 @@ export function createTray(
 
             const session = window.webContents.session
             await session.clearStorageData({
-              storages: ['cookies', 'localstorage', 'indexdb', 'websql', 'cachestorage', 'serviceworkers', 'filesystem']
+              storages: [
+                'cookies',
+                'localstorage',
+                'indexdb',
+                'websql',
+                'cachestorage',
+                'serviceworkers',
+                'filesystem'
+              ]
             })
             await session.clearCache()
             await session.clearCodeCaches({})
