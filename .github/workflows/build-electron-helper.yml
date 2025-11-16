@@ -30,9 +30,21 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Create .env for build
+        # This file will be packaged into the app so it works on users' machines
+        run: |
+          cat > .env <<EOF
+          DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID}
+          ELECTRON_APP_URL=https://unreleasedworld.netlify.app
+          UNRL_PRESENCE_LOG=0
+          EOF
+        env:
+          DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
+
       - name: Build Electron app
         env:
           DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
+          ELECTRON_APP_URL: https://unreleasedworld.netlify.app
         run: npm run build
 
       - name: Upload build artifacts
