@@ -83,7 +83,7 @@ If you downloaded the app directly from the **official GitHub repo / website** a
 1. Open **Terminal** (Applications → Utilities → Terminal).
 2. Run this command (adjust the name if your app name is slightly different):
 
-   sudo xattr -cr "/Applications/Unreleasd Presence.app"
+   sudo xattr -cr "/Applications/Unreleased Presence.app"
 
 3. Enter your Mac login password when prompted (you won’t see any characters while typing).
 4. Close Terminal and try opening **Unreleasd Presence** again from Applications.
