@@ -1,241 +1,155 @@
-# Unreleasd Presence - Electron Helper
+# Unreleasd Presence – Desktop Helper  
+_Last updated: November 16, 2025_
 
-Production-ready Electron application for Discord Rich Presence integration.
+This app is a small desktop helper that connects **unreleased.world** to **Discord Rich Presence**.  
+It is **open source** and **unsigned**, so macOS and Windows may show security warnings the first time you open it.
 
-## Features
-
-- ✅ **Secure IPC Bridge**: Preload script with allowlisted origins and Zod validation
-- ✅ **Discord RPC Integration**: Auto-reconnect, throttling (~1/sec), resilient connection
-- ✅ **Context-Aware Presence**: Detects browsing, artist, track, and profile contexts
-- ✅ **System Tray**: Toggle presence, clear status, open app, quit
-- ✅ **Deep Linking**: View in app buttons with direct URLs
-- ✅ **Cross-Platform**: macOS (dmg/zip) and Windows (NSIS) builds
-- ✅ **Auto-Packaging**: electron-builder with CI/CD workflow
+---
 
-## Architecture
+## 1. Which download should I use?
 
-### Security
-
-- **Context Isolation**: Enabled (`contextIsolation: true`)
-- **Sandbox**: Enabled (`sandbox: true`)
-- **No Remote Module**: Disabled for security
-- **Strict CSP**: Content Security Policy headers
-- **Navigation Filtering**: Only allowed origins can navigate
-- **External Links**: Automatically open in default browser
-- **Origin Allowlist**:
-  - `https://unreleasd.world`
-  - `https://unreleased.world`
-  - `http://localhost:3000`
+- **Windows (x64 or x86)**  
+  Download the `.exe` installer from the **Windows** artifact / release.
 
-### IPC Communication
+- **macOS – Apple Silicon (M1 / M2 / M3 / M4)**  
+  Download the `...-mac-arm64.dmg` (or `.zip`).
 
-```typescript
-// Preload exposes safe API
-window.unrlPresence.update({
-  context: 'track',
-  artistName: 'Artist Name',
-  trackTitle: 'Track Title',
-  deepLink: 'https://unreleasd.world/artist/...',
-  timestamp: Date.now()
-})
+- **macOS – Intel**  
+  Download the `...-mac-x64.dmg` (or `.zip`).
 
-window.unrlPresence.clear()
-```
+> ✅ If you’re not sure which Mac you have:  
+> Click  → **About This Mac** → check if it says **Apple M-chip** (Apple Silicon) or **Intel**.
 
-### Presence Contexts
+---
 
-1. **Browsing**: "Browsing unreleasd.world"
-2. **Artist**: "Exploring artist - {artistName}"
-3. **Track**: "Listening to a drop - {artist} — {track}" (with timestamp)
-4. **Profile**: "Viewing profile"
+## 2. General requirements
 
-### Rate Limiting
+- You must have the **Discord desktop app** installed and running.
+- Log into **unreleased.world** in the built-in Electron window.
+- Once logged in and playing music, Discord should show the **Rich Presence**.
 
-- **Throttle**: 1 update per second maximum
-- **Queue**: Updates queued during throttle period
-- **Non-blocking**: Never blocks UI if Discord unavailable
+---
 
-## Quick Start
+## 3. macOS (Apple Silicon & Intel)
 
-### Development
+### A. Install the app
 
-```bash
-# Install dependencies
-npm --prefix electron-helper install
+1. Download the correct **DMG** for your Mac (`arm64` for Apple Silicon, `x64` for Intel).
+2. Double-click the `.dmg` file.
+3. Drag **Unreleasd Presence.app** into your **Applications** folder.
+4. Eject the DMG.
 
-# Run in development mode (with DevTools)
-npm run eh:dev
-```
+---
 
-### Building
+### B. First launch – unsigned app (normal case)
 
-```bash
-# Build TypeScript only
-npm --prefix electron-helper run build:app
+On first open, macOS may show:
 
-# Build distributable packages
-npm run eh:build
+> “Unreleasd Presence” can’t be opened because it is from an unidentified developer.
 
-# Build without packaging (faster, for testing)
-npm run eh:pack
-```
+Do this:
 
-### Environment Variables
+1. Open **System Settings → Privacy & Security**.
+2. Scroll down to the **Security** section.
+3. You should see a message like:  
+   _“Unreleasd Presence was blocked from use because it is not from an identified developer”_  
+4. Click **“Open Anyway”**.
+5. In the popup, click **“Open”** again.
 
-Required in `.env`:
+After doing this once, you can open the app normally from Launchpad / Applications.
 
-```bash
-DISCORD_CLIENT_ID=your_discord_app_id
-DEV_URL=http://localhost:3000  # Optional, for development
-```
+---
 
-## Project Structure
+### C. Fallback #1 – Right-click → Open
 
-```
-electron-helper/
-├── app/
-│   ├── main.ts        # Main process: window, IPC, navigation
-│   ├── preload.ts     # Secure bridge: window.unrlPresence API
-│   ├── rpc.ts         # Discord RPC wrapper with reconnect
-│   ├── presence.ts    # Activity payload builder
-│   └── tray.ts        # System tray menu
-├── scripts/
-│   └── notarization.md # macOS signing instructions
-├── builder.config.json # electron-builder configuration
-├── package.json
-└── tsconfig.json
-```
+If you don’t see **“Open Anyway”** in Privacy & Security:
 
-## Configuration
+1. Open **Finder → Applications**.
+2. **Right-click** (or Ctrl-click) on **Unreleasd Presence.app**.
+3. Click **Open**.
+4. macOS will show a similar warning, but now with an **Open** button.  
+5. Click **Open**.
 
-### electron-builder
+---
 
-- **App ID**: `com.unreleasd.presence`
-- **Product Name**: `Unreleasd Presence`
-- **macOS**: DMG + ZIP (x64, arm64)
-- **Windows**: NSIS installer (x64)
-- **ASAR**: Enabled for app protection
+### D. Fallback #2 – “App is damaged” message (advanced)
 
-### Signing (macOS)
+Some versions of macOS may show:
 
-See `scripts/notarization.md` for:
-- Developer certificate setup
-- App-specific password creation
-- Notarization process
-- CI/CD secrets configuration
+> “Unreleasd Presence” is damaged and can’t be opened. You should move it to the Trash.
 
-## CI/CD
+If you downloaded the app directly from the **official GitHub repo / website** and you trust it, you can clear macOS’ quarantine flag:
 
-GitHub Actions workflow: `.github/workflows/electron-release.yml`
+1. Open **Terminal** (Applications → Utilities → Terminal).
+2. Run this command (adjust the name if your app name is slightly different):
 
-**Triggers**: Push tag `v*` (e.g., `v1.0.0`)
+   sudo xattr -cr "/Applications/Unreleasd Presence.app"
 
-**Outputs**:
-- macOS: `.dmg` and `.zip` files
-- Windows: `.exe` installer
-- Uploaded as workflow artifacts
-- Draft GitHub release created
+3. Enter your Mac login password when prompted (you won’t see any characters while typing).
+4. Close Terminal and try opening **Unreleasd Presence** again from Applications.
 
-**Secrets Required** (for macOS signing):
-- `APPLE_ID`
-- `APPLE_PASSWORD`
-- `APPLE_TEAM_ID`
-- `CSC_LINK`
-- `CSC_KEY_PASSWORD`
+> ⚠️ Only use this if you downloaded the app from the **official source** and you trust it.
 
-## Web Integration
+---
 
-The web app auto-initializes Rich Presence when:
-- `NEXT_PUBLIC_RP_ENABLED !== '0'` (enabled by default)
-- Client-side JavaScript loaded
-- SDK initialized via `initializeEmitter()`
+## 4. Windows (x64 / x86)
 
-Dev page `/rp` remains gated by `NEXT_PUBLIC_ENABLE_RP_DEV=1`.
+### A. Install and run
 
-## Discord Setup
+1. Download the **Windows** installer (`Unreleasd-Presence-...-win-...exe`).
+2. Double-click the `.exe`.
+3. Follow the installer steps (one-click NSIS installer).
+4. When the installer completes, it will create a shortcut in **Start Menu** (and optionally on Desktop).
+5. Launch **Unreleasd Presence** from the Start Menu / shortcut.
 
-1. Create Discord application at [Discord Developer Portal](https://discord.com/developers/applications)
-2. Upload art asset with key: `unreleasd_logo`
-3. Copy Application ID
-4. Set `DISCORD_CLIENT_ID` in `.env`
+---
 
-## Usage
+### B. “Windows protected your PC” (SmartScreen)
 
-See `docs/electron/USAGE.md` for:
-- Installation instructions
-- Configuration guide
-- Testing procedures
-- Troubleshooting tips
+On some systems, you may see:
 
-## Scripts
+> “Windows protected your PC”
+> *Microsoft Defender SmartScreen prevented an unrecognized app from starting.*
 
-From project root:
+To continue:
 
-```bash
-# Development
-npm run eh:dev
+1. Click **More info**.
+2. Click **Run anyway**.
+3. Complete the installation and launch the app.
 
-# Build distributables
-npm run eh:build
+Again, only do this if you downloaded from the **official GitHub repo / website** and you trust the app.
 
-# Quick build (no packaging)
-npm run eh:pack
+---
 
-# Type checking
-npm --prefix electron-helper run typecheck
-```
+## 5. After launching the helper
 
-## Dependencies
+To see Discord Rich Presence working:
 
-**Runtime**:
-- `@xhayper/discord-rpc` - Discord RPC client
-- `zod` - Schema validation
-- `dotenv` - Environment configuration
+1. Make sure **Discord desktop** is running and you are logged in.
+2. Open **Unreleasd Presence**.
+3. Log into **unreleased.world** inside the Electron window (if prompted).
+4. Start playing a track on **unreleased.world**.
+5. In Discord, open your profile card and confirm you see **Listening to unreleased.world** with track details.
 
-**Dev**:
-- `electron` ^30.0.0
-- `electron-builder` ^24.13.0
-- `typescript` ^5.3.0
+If presence doesn’t show:
 
-## Security Notes
+* Check that **“Display current activity as status message”** is enabled in Discord:
+  **Settings → Activity Privacy → Display current activity as status message**.
+* Restart both **Discord** and **Unreleasd Presence**, then try again.
+* Make sure only **one** Discord instance is running and that the helper app is open.
 
-1. **No eval()**: No dynamic code execution
-2. **No Node in Renderer**: `nodeIntegration: false`
-3. **Sandboxed**: `sandbox: true`
-4. **CSP Headers**: Strict Content Security Policy
-5. **Origin Validation**: IPC messages validated by origin
-6. **Zod Schemas**: All payloads validated before processing
-7. **Truncation**: All strings truncated to Discord limits
-8. **No Sensitive Data**: No credentials stored or transmitted
+---
 
-## Performance
+## 6. Getting help / reporting issues
 
-- **Startup**: ~500ms to window display
-- **RPC Connect**: ~1-2s to Discord connection
-- **Memory**: ~100-150MB typical usage
-- **Updates**: <1ms per presence update
-- **Throttle**: 1 update/sec prevents rate limiting
+If something doesn’t work:
 
-## Known Limitations
+* Open the GitHub repo’s **Issues** tab.
+* Include:
 
-- Discord desktop app must be running
-- macOS unsigned builds require `xattr -cr` to run
-- Windows SmartScreen may warn on first run
-- Updates throttled to prevent API rate limits
+  * Your OS (Windows / macOS, Intel or Apple Silicon).
+  * What you downloaded (exact file name).
+  * What you tried.
+  * Any error messages or screenshots.
 
-## Future Enhancements
-
-- [ ] Auto-updater integration
-- [ ] Minimize to tray on close
-- [ ] Custom presence templates
-- [ ] Settings UI panel
-- [ ] Activity history log
-- [ ] Multiple Discord account support
-
-## License
-
-See root project LICENSE
-
-## Support
-
-For issues, see `docs/electron/USAGE.md` troubleshooting section.
+This helps us debug and improve the unsigned builds for everyone.
