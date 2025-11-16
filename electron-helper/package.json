@@ -37,7 +37,7 @@
     },
     "mac": {
       "category": "public.app-category.music",
-      "icon": "build/icon.png",
+      "icon": "build/icon-mac.png",
       "artifactName": "Unreleasd-Presence-${version}-${os}-${arch}.${ext}",
       "target": [
         {
@@ -57,7 +57,7 @@
       ]
     },
     "win": {
-      "icon": "build/icon.png",
+      "icon": "build/icon-win.ico",
       "artifactName": "Unreleasd-Presence-${version}-${os}-${arch}.${ext}",
       "target": [
         "nsis",
