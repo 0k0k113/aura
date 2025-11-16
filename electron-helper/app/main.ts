@@ -185,7 +185,7 @@ function setupIPC(): void {
         artist_name: payloadWithConvertedTimestamp.artist_name,
         artist_id: payloadWithConvertedTimestamp.artist_id,
         is_playing: payloadWithConvertedTimestamp.is_playing,
-        position_ms: payloadWithConvertedTimestamp.position_ms,
+        position_ms: payloadWithConvertedTimestamp.position_ms
       })
 
       const currentUrl = mainWindow?.webContents.getURL() || ''
@@ -197,7 +197,7 @@ function setupIPC(): void {
           details: activity.details,
           largeImageKey: activity.largeImageKey,
           largeImageText: activity.largeImageText,
-          hasTimestamp: !!activity.startTimestamp,
+          hasTimestamp: !!activity.startTimestamp
         })
       }
 
@@ -205,54 +205,76 @@ function setupIPC(): void {
         let bypassThrottle = false
 
         const currentTrackId = validated.data.track_id || `${validated.data.track_title}_${validated.data.artist_name}`
-        const hasTrackInfo = validated.data.track_title || validated.data.artist_name || validated.data.position_ms !== undefined
-        const isTrackChange = hasTrackInfo && currentTrackId !== lastTrackId && currentTrackId !== '_undefined'
+        const hasTrackInfo =
+          validated.data.track_title || validated.data.artist_name || validated.data.position_ms !== undefined
+        const isTrackChange =
+          hasTrackInfo && currentTrackId !== lastTrackId && currentTrackId !== '_undefined'
         const isSeek = validated.data.seek_seq !== undefined && validated.data.seek_seq > lastSeekSeq
 
-        const positionDeviation = validated.data.position_ms !== undefined && lastPosition >= 0
-          ? Math.abs(validated.data.position_ms - lastPosition)
-          : 0
+        const positionDeviation =
+          validated.data.position_ms !== undefined && lastPosition >= 0
+            ? Math.abs(validated.data.position_ms - lastPosition)
+            : 0
         const isSignificantJump = positionDeviation >= 1500
 
-        const isTrackEnd = validated.data.position_ms !== undefined &&
-                           validated.data.duration_ms !== undefined &&
-                           validated.data.duration_ms > 0 &&
-                           validated.data.position_ms >= validated.data.duration_ms - 500 &&
-                           validated.data.is_playing === false
+        const isTrackEnd =
+          validated.data.position_ms !== undefined &&
+          validated.data.duration_ms !== undefined &&
+          validated.data.duration_ms > 0 &&
+          validated.data.position_ms >= validated.data.duration_ms - 500 &&
+          validated.data.is_playing === false
 
         // Detect transition from playing to browsing (for timestamp clearing)
         const wasPreviouslyPlaying = lastTrackId !== undefined
-        const isNowBrowsing = validated.data.context === 'browsing' || (!hasTrackInfo && validated.data.is_playing !== true)
+        const isNowBrowsing =
+          validated.data.context === 'browsing' || (!hasTrackInfo && validated.data.is_playing !== true)
         const isBrowsingTransition = wasPreviouslyPlaying && isNowBrowsing
 
         // Detect pause/play transitions (for artist-browsing fallback)
-        const isPlayStateChange = validated.data.is_playing !== lastIsPlaying && lastIsPlaying !== undefined
+        const isPlayStateChange =
+          validated.data.is_playing !== lastIsPlaying && lastIsPlaying !== undefined
 
         if (isTrackChange) {
-          console.log(`[IPC] Track change detected, bypassing throttle ${traceId ? `[${traceId}]` : ''}`)
+          console.log(
+            `[IPC] Track change detected, bypassing throttle ${traceId ? `[${traceId}]` : ''}`
+          )
           lastTrackId = currentTrackId
           lastSeekSeq = validated.data.seek_seq ?? -1
           lastPosition = validated.data.position_ms ?? -1
           bypassThrottle = true
         } else if (isTrackEnd) {
-          console.log(`[IPC] Track end detected, bypassing throttle for next track or browsing ${traceId ? `[${traceId}]` : ''}`)
+          console.log(
+            `[IPC] Track end detected, bypassing throttle for next track or browsing ${
+              traceId ? `[${traceId}]` : ''
+            }`
+          )
           lastTrackId = undefined
           lastSeekSeq = -1
           lastPosition = -1
           bypassThrottle = true
         } else if (isBrowsingTransition) {
-          console.log(`[IPC] Browsing transition detected, bypassing throttle to clear timestamps ${traceId ? `[${traceId}]` : ''}`)
+          console.log(
+            `[IPC] Browsing transition detected, bypassing throttle to clear timestamps ${
+              traceId ? `[${traceId}]` : ''
+            }`
+          )
           lastTrackId = undefined
           lastSeekSeq = -1
           lastPosition = -1
           bypassThrottle = true
         } else if (isSeek && validated.data.seek_seq !== undefined) {
-          console.log(`[IPC] Seek detected, bypassing throttle ${traceId ? `[${traceId}]` : ''}`)
+          console.log(
+            `[IPC] Seek detected, bypassing throttle ${traceId ? `[${traceId}]` : ''}`
+          )
           lastSeekSeq = validated.data.seek_seq
           lastPosition = validated.data.position_ms ?? -1
           bypassThrottle = true
         } else if (isSignificantJump) {
-          console.log(`[IPC] Significant position jump detected, bypassing throttle ${traceId ? `[${traceId}]` : ''}`)
+          console.log(
+            `[IPC] Significant position jump detected, bypassing throttle ${
+              traceId ? `[${traceId}]` : ''
+            }`
+          )
           lastPosition = validated.data.position_ms ?? -1
           bypassThrottle = true
         } else if (validated.data.position_ms !== undefined) {
@@ -262,7 +284,11 @@ function setupIPC(): void {
         // Detect and bypass on pause/play transitions
         if (isPlayStateChange) {
           if (debugEnabled) {
-            console.log(`[IPC:${traceId}#${++seq}] Play state changed (${String(lastIsPlaying)} → ${String(validated.data.is_playing)}), bypassing throttle`)
+            console.log(
+              `[IPC:${traceId}#${++seq}] Play state changed (${String(
+                lastIsPlaying
+              )} → ${String(validated.data.is_playing)}), bypassing throttle`
+            )
           }
           bypassThrottle = true
         }
@@ -312,7 +338,15 @@ function setupIPC(): void {
 
       const session = mainWindow.webContents.session
       await session.clearStorageData({
-        storages: ['cookies', 'localstorage', 'indexdb', 'websql', 'cachestorage', 'serviceworkers', 'filesystem']
+        storages: [
+          'cookies',
+          'localstorage',
+          'indexdb',
+          'websql',
+          'cachestorage',
+          'serviceworkers',
+          'filesystem'
+        ]
       })
       await session.clearCache()
       await session.clearCodeCaches({})
@@ -346,6 +380,10 @@ function initializeRPC(): void {
   console.log(`[RPC] Environment loaded - DISCORD_CLIENT_ID present: ${hasClientId}`)
 
   if (!hasClientId) {
+    console.warn(
+      '[RPC] DISCORD_CLIENT_ID is not set. Discord Rich Presence will be disabled. ' +
+        'Ensure a .env with DISCORD_CLIENT_ID is bundled or set in the environment.'
+    )
     return
   }
 
