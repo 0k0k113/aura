@@ -33,10 +33,7 @@ function loadTrayImage(): Electron.NativeImage {
           path.join(resBuild, 'icon.png'),
           path.join(resBuild, 'icon.ico')
         ]
-      : [
-          path.join(resBuild, 'tray.png'),
-          path.join(resBuild, 'icon.png')
-        ]
+      : [path.join(resBuild, 'tray.png'), path.join(resBuild, 'icon.png')]
 
   candidates.push(...resCandidates)
 
@@ -56,10 +53,7 @@ function loadTrayImage(): Electron.NativeImage {
           path.join(localBuild, 'icon.png'),
           path.join(localBuild, 'icon.ico')
         ]
-      : [
-          path.join(localBuild, 'tray.png'),
-          path.join(localBuild, 'icon.png')
-        ]
+      : [path.join(localBuild, 'tray.png'), path.join(localBuild, 'icon.png')]
 
   candidates.push(...devCandidates)
 
