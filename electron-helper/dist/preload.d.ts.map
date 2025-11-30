@@ -1,1 +1,0 @@
-{"version":3,"file":"preload.d.ts","sourceRoot":"","sources":["../app/preload.ts"],"names":[],"mappings":"AAiIA,QAAA,MAAM,eAAe;sBACD,OAAO,KAAG,IAAI;iBAyErB,IAAI;gBAcC,OAAO,CAAC;QAAE,MAAM,EAAE,MAAM,CAAC;QAAC,UAAU,EAAE,OAAO,CAAA;KAAE,CAAC;CASjE,CAAA;AAQD,OAAO,CAAC,MAAM,CAAC;IACb,UAAU,MAAM;QACd,YAAY,EAAE,OAAO,eAAe,CAAA;KACrC;CACF"}
