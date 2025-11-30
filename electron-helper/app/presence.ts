@@ -22,7 +22,7 @@ interface PresencePayload {
 }
 
 const FALLBACK_ASSET_KEY = 'unreleasd_logo'
-const BASE_URL = 'https://unreleasedworld.netlify.app'
+const BASE_URL = 'https://unreleased.world'
 const APP_NAME = 'unreleased.world'
 
 // Transliteration map for special characters to readable ASCII
