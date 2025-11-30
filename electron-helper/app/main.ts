@@ -26,7 +26,7 @@ import { createPresenceActivity } from './presence'
 import { createTray } from './tray'
 import { z } from 'zod'
 
-const START_URL = process.env.ELECTRON_APP_URL || 'https://unreleasedworld.netlify.app'
+const START_URL = process.env.ELECTRON_APP_URL || 'https://unreleased.world'
 const ALLOWED_ORIGIN = START_URL
 
 let mainWindow: BrowserWindow | null = null
@@ -82,9 +82,9 @@ function createWindow(): void {
           `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${START_URL}; ` +
           `style-src 'self' 'unsafe-inline' ${START_URL}; ` +
           `img-src 'self' data: https: blob:; ` +
-          `connect-src 'self' https: ws: wss: data: https://unreleasedworld.netlify.app; ` +
+          `connect-src 'self' https: ws: wss: data: https://unreleased.world; ` +
           `font-src 'self' data: ${START_URL}; ` +
-          `media-src 'self' https: data: blob: https://unreleasedworld.netlify.app;`
+          `media-src 'self' https: data: blob: https://unreleased.world;`
         ]
       }
     })
