@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
-const ALLOWED_ORIGIN = 'https://unreleasedworld.netlify.app'
+const ALLOWED_ORIGIN = 'https://www.unreleased.world'
 
 interface PresencePayload {
   context?: 'browsing' | 'artist' | 'track' | 'profile'
