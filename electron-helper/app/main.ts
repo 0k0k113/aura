@@ -27,7 +27,11 @@ import { createTray } from './tray'
 import { z } from 'zod'
 
 const START_URL = process.env.ELECTRON_APP_URL || 'https://unreleased.world'
-const ALLOWED_ORIGIN = START_URL
+// Allow both www and non-www origins to match with preload (which uses www.unreleased.world)
+const ALLOWED_ORIGINS = [
+  'https://unreleased.world',
+  'https://www.unreleased.world'
+]
 
 let mainWindow: BrowserWindow | null = null
 let rpc: DiscordRPC | null = null
@@ -35,8 +39,6 @@ let lastSeekSeq = -1
 let lastTrackId: string | undefined
 let lastPosition = -1
 let lastIsPlaying: boolean | undefined
-const debugEnabled = process.env.UNRL_PRESENCE_LOG === '1'
-let seq = 0
 
 const presencePayloadSchema = z.object({
   context: z.enum(['browsing', 'artist', 'track', 'profile']).optional(),
@@ -44,6 +46,10 @@ const presencePayloadSchema = z.object({
   artist_id: z.string().optional(),
   track_title: z.string().max(128).optional(),
   album_name: z.string().max(128).optional(),
+  album_type: z.string().max(128).optional(),
+  album_tracks_count: z.number().optional(),
+  is_single: z.boolean().optional(),
+  track_image_url: z.string().max(300).optional(),
   deep_link: z.string().optional(),
   timestamp: z.number().optional(),
   position_ms: z.number().optional(),
@@ -124,9 +130,15 @@ function createWindow(): void {
   mainWindow.webContents.on('will-navigate', (event, url) => {
     try {
       const parsedUrl = new URL(url)
-      const allowedUrl = new URL(ALLOWED_ORIGIN)
+      const isAllowedOrigin = ALLOWED_ORIGINS.some(origin => {
+        try {
+          return new URL(origin).origin === parsedUrl.origin
+        } catch {
+          return false
+        }
+      })
 
-      if (parsedUrl.origin !== allowedUrl.origin) {
+      if (!isAllowedOrigin) {
         event.preventDefault()
         shell.openExternal(url)
       }
@@ -150,36 +162,64 @@ function createWindow(): void {
 }
 
 function setupIPC(): void {
+  console.log('[RP:Main] Setting up IPC handlers')
+  console.log('[RP:Main] Allowed origins:', ALLOWED_ORIGINS)
+
   ipcMain.on('presence:update', (event, payload) => {
+    console.log('[RP:Main] ========== presence:update received ==========')
+    console.log('[RP:Main] Raw payload:', JSON.stringify(payload, null, 2))
+
     try {
       const senderOrigin = event.senderFrame.url
-      const allowedUrl = new URL(ALLOWED_ORIGIN)
       const senderUrl = new URL(senderOrigin)
 
-      if (senderUrl.origin !== allowedUrl.origin) {
-        console.warn('[IPC] Presence update from disallowed origin:', senderOrigin)
+      console.log('[RP:Main] Sender origin:', senderUrl.origin)
+
+      const isAllowedOrigin = ALLOWED_ORIGINS.some(origin => {
+        try {
+          return new URL(origin).origin === senderUrl.origin
+        } catch {
+          return false
+        }
+      })
+
+      if (!isAllowedOrigin) {
+        console.warn('[RP:Main] Presence update from disallowed origin:', senderOrigin)
         return
       }
+
+      console.log('[RP:Main] Origin check passed')
 
       const validated = presencePayloadSchema.safeParse(payload)
       if (!validated.success) {
-        console.warn('[IPC] Invalid presence payload:', validated.error)
+        console.error('[RP:Main] Presence validation failed:', validated.error.format())
         return
       }
 
+      console.log('[RP:Main] Presence payload validated successfully')
+
       if (!rpc) {
-        console.warn('[IPC] RPC not initialized')
+        console.warn('[RP:Main] RPC not initialized - presence will not be forwarded to Discord')
         return
       }
+
+      console.log('[RP:Main] RPC is available, checking connection:', rpc.isReady() ? 'connected' : 'disconnected')
 
       const payloadWithConvertedTimestamp = {
         ...validated.data,
         timestamp: validated.data.timestamp ? Math.floor(validated.data.timestamp / 1000) : undefined
       }
 
-      // Enhanced logging for debugging
-      const traceId = validated.data.trace_id
-      console.log(`[IPC:${traceId}] Received presence payload:`, {
+      // Log timestamp conversion
+      if (validated.data.timestamp) {
+        console.log('[RP:Main] Timestamp conversion (ms → s):', {
+          originalMs: validated.data.timestamp,
+          convertedS: payloadWithConvertedTimestamp.timestamp
+        })
+      }
+
+      const traceId = validated.data.trace_id || 'no-trace'
+      console.log(`[RP:Main][${traceId}] Processed presence payload:`, {
         context: payloadWithConvertedTimestamp.context,
         track_title: payloadWithConvertedTimestamp.track_title,
         artist_name: payloadWithConvertedTimestamp.artist_name,
@@ -192,13 +232,17 @@ function setupIPC(): void {
       const activity = createPresenceActivity(currentUrl, payloadWithConvertedTimestamp)
 
       if (activity) {
-        console.log(`[IPC:${traceId}] Created Discord activity:`, {
+        console.log(`[RP:Main][${traceId}] Created Discord activity:`, {
           name: activity.name,
           details: activity.details,
+          state: activity.state,
           largeImageKey: activity.largeImageKey,
           largeImageText: activity.largeImageText,
-          hasTimestamp: !!activity.startTimestamp
+          startTimestamp: (activity as any).startTimestamp,
+          endTimestamp: (activity as any).endTimestamp
         })
+      } else {
+        console.log(`[RP:Main][${traceId}] No activity created (createPresenceActivity returned null)`)
       }
 
       if (activity) {
@@ -236,7 +280,7 @@ function setupIPC(): void {
 
         if (isTrackChange) {
           console.log(
-            `[IPC] Track change detected, bypassing throttle ${traceId ? `[${traceId}]` : ''}`
+            `[RP:Main][${traceId}] Track change detected, bypassing throttle`
           )
           lastTrackId = currentTrackId
           lastSeekSeq = validated.data.seek_seq ?? -1
@@ -244,9 +288,7 @@ function setupIPC(): void {
           bypassThrottle = true
         } else if (isTrackEnd) {
           console.log(
-            `[IPC] Track end detected, bypassing throttle for next track or browsing ${
-              traceId ? `[${traceId}]` : ''
-            }`
+            `[RP:Main][${traceId}] Track end detected, bypassing throttle for next track or browsing`
           )
           lastTrackId = undefined
           lastSeekSeq = -1
@@ -254,9 +296,7 @@ function setupIPC(): void {
           bypassThrottle = true
         } else if (isBrowsingTransition) {
           console.log(
-            `[IPC] Browsing transition detected, bypassing throttle to clear timestamps ${
-              traceId ? `[${traceId}]` : ''
-            }`
+            `[RP:Main][${traceId}] Browsing transition detected, bypassing throttle to clear timestamps`
           )
           lastTrackId = undefined
           lastSeekSeq = -1
@@ -264,16 +304,14 @@ function setupIPC(): void {
           bypassThrottle = true
         } else if (isSeek && validated.data.seek_seq !== undefined) {
           console.log(
-            `[IPC] Seek detected, bypassing throttle ${traceId ? `[${traceId}]` : ''}`
+            `[RP:Main][${traceId}] Seek detected, bypassing throttle`
           )
           lastSeekSeq = validated.data.seek_seq
           lastPosition = validated.data.position_ms ?? -1
           bypassThrottle = true
         } else if (isSignificantJump) {
           console.log(
-            `[IPC] Significant position jump detected, bypassing throttle ${
-              traceId ? `[${traceId}]` : ''
-            }`
+            `[RP:Main][${traceId}] Significant position jump detected, bypassing throttle`
           )
           lastPosition = validated.data.position_ms ?? -1
           bypassThrottle = true
@@ -283,13 +321,9 @@ function setupIPC(): void {
 
         // Detect and bypass on pause/play transitions
         if (isPlayStateChange) {
-          if (debugEnabled) {
-            console.log(
-              `[IPC:${traceId}#${++seq}] Play state changed (${String(
-                lastIsPlaying
-              )} → ${String(validated.data.is_playing)}), bypassing throttle`
-            )
-          }
+          console.log(
+            `[RP:Main][${traceId}] Play state changed (${String(lastIsPlaying)} → ${String(validated.data.is_playing)}), bypassing throttle`
+          )
           bypassThrottle = true
         }
 
@@ -301,24 +335,31 @@ function setupIPC(): void {
           lastTrackId = undefined
         }
 
+        console.log(`[RP:Main][${traceId}] Calling rpc.setActivity with bypassThrottle=${bypassThrottle}`)
         rpc.setActivity(activity, bypassThrottle)
       }
     } catch (error) {
-      console.error('[IPC] Error handling presence update:', error)
+      console.error('[RP:Main] Error handling presence update:', error)
     }
   })
 
   ipcMain.on('presence:clear', () => {
+    console.log('[RP:Main] presence:clear received')
     if (rpc) {
+      console.log('[RP:Main] Calling rpc.clearActivity()')
       rpc.clearActivity()
+    } else {
+      console.warn('[RP:Main] RPC not initialized, cannot clear activity')
     }
   })
 
   ipcMain.handle('presence:ping', () => {
-    return {
+    const response = {
       origin: START_URL,
       hasDiscord: !!rpc && rpc.isReady()
     }
+    console.log('[RP:Main] presence:ping received, responding:', response)
+    return response
   })
 
   ipcMain.handle('presence:clear-all-data', async () => {
