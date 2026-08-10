@@ -17,15 +17,27 @@
 // M-series Macs were hitting with the arm64 downloads.
 //
 // An ad-hoc signature (`codesign --sign -`) satisfies the arm64 requirement
-// without an Apple Developer account. The app then launches normally after the
-// standard "unidentified developer" right-click → Open, instead of being
-// declared damaged and pushed toward the Trash.
+// without an Apple Developer account. The app then launches after the standard
+// unidentified-developer approval, instead of being declared damaged.
 //
-// ── Why not `--deep` ─────────────────────────────────────────────────────────
+// ── Signing order ────────────────────────────────────────────────────────────
 // `codesign --deep` is deprecated by Apple and signs nested code in an order
-// that leaves helper apps and frameworks intermittently unsigned. Signing
-// bottom-up — every nested Mach-O first, the outer bundle last — is what Apple
-// documents and is reliable. That's what this script does.
+// that leaves helper apps and frameworks intermittently unsigned. The correct
+// approach is bottom-up: every nested Mach-O and nested bundle first, deepest
+// first, then the outer bundle last. Sorting candidates by path depth
+// guarantees that regardless of the order the directory walk produced.
+//
+// ── Finding the nested code ──────────────────────────────────────────────────
+// Nested executables must be found by CONTENT, not by file extension. The first
+// version of this script matched only `.dylib`, `.so` and `.node`, which missed
+// every extension-less Mach-O executable — `chrome_crashpad_handler`, the
+// Helper apps' main binaries, and so on. That passed on arm64 (Electron ships
+// its darwin-arm64 binaries already ad-hoc signed, so those only needed
+// re-sealing) and failed on x64, where they arrive unsigned:
+//
+//     Electron Framework.framework: code object is not signed at all
+//
+// Mach-O files are identified here by their magic number instead.
 //
 // ── Why afterPack, not afterSign ─────────────────────────────────────────────
 // electron-builder does not invoke `afterSign` when it skipped signing — which
@@ -44,8 +56,44 @@ function hasRealIdentity() {
   return process.env.CSC_IDENTITY_AUTO_DISCOVERY === 'true'
 }
 
-/** Recursively collect nested code that must be signed before the outer bundle. */
-function collectNestedCode(dir, found = []) {
+/** Directory suffixes that codesign treats as a single signable unit. */
+const BUNDLE_SUFFIXES = /\.(app|framework|xpc|bundle|plugin)$/
+
+/**
+ * Mach-O magic numbers, big- and little-endian, 32- and 64-bit, plus the
+ * universal/fat header. This is how an extension-less executable is recognized.
+ */
+const MACH_O_MAGIC = new Set([
+  0xfeedface, 0xfeedfacf, // big-endian 32 / 64
+  0xcefaedfe, 0xcffaedfe, // little-endian 32 / 64
+  0xcafebabe, 0xbebafeca, // universal (fat) binary, both byte orders
+])
+
+function isMachO(file) {
+  let fd
+  try {
+    fd = fs.openSync(file, 'r')
+    const header = Buffer.alloc(4)
+    if (fs.readSync(fd, header, 0, 4, 0) < 4) return false
+    return MACH_O_MAGIC.has(header.readUInt32BE(0))
+  } catch {
+    return false
+  } finally {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd)
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
+/**
+ * Collect every path that needs its own signature: nested bundles, framework
+ * version directories, and any Mach-O file.
+ */
+function collectSignTargets(dir, found = []) {
   let entries
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true })
@@ -56,21 +104,32 @@ function collectNestedCode(dir, found = []) {
   for (const entry of entries) {
     const full = path.join(dir, entry.name)
 
+    // Never follow symlinks — a framework's Versions/Current points back at a
+    // real version directory and would be signed twice, or worse, cycle.
+    if (entry.isSymbolicLink()) continue
+
     if (entry.isDirectory()) {
-      // Nested bundles are signed as a unit; don't descend past them.
-      if (/\.(app|framework|xpc|bundle)$/.test(entry.name)) {
-        collectNestedCode(full, found)
+      collectSignTargets(full, found)
+
+      if (BUNDLE_SUFFIXES.test(entry.name)) {
+        // Apple signs a framework through its versioned directory, not the
+        // top-level alias, so add those explicitly when present.
+        if (entry.name.endsWith('.framework')) {
+          const versionsDir = path.join(full, 'Versions')
+          if (fs.existsSync(versionsDir)) {
+            for (const version of fs.readdirSync(versionsDir, { withFileTypes: true })) {
+              if (version.isDirectory() && !version.isSymbolicLink()) {
+                found.push(path.join(versionsDir, version.name))
+              }
+            }
+          }
+        }
         found.push(full)
-        continue
       }
-      collectNestedCode(full, found)
       continue
     }
 
-    if (entry.isSymbolicLink()) continue
-
-    // Loadable code and bare Mach-O executables inside Helpers/MacOS dirs.
-    if (/\.(dylib|so|node)$/.test(entry.name)) {
+    if (entry.isFile() && isMachO(full)) {
       found.push(full)
     }
   }
@@ -107,23 +166,31 @@ exports.default = async function adhocSign(context) {
     throw new Error(`[adhoc-sign] Expected app bundle not found at ${appPath}`)
   }
 
-  console.log(`[adhoc-sign] Ad-hoc signing ${path.basename(appPath)} (no Developer ID configured)`)
+  console.log(
+    `[adhoc-sign] Ad-hoc signing ${path.basename(appPath)} for ${context.arch === 1 ? 'x64' : context.arch === 3 ? 'arm64' : `arch ${context.arch}`} (no Developer ID configured)`,
+  )
 
-  const nested = collectNestedCode(path.join(appPath, 'Contents'))
-  for (const target of nested) {
+  const targets = collectSignTargets(path.join(appPath, 'Contents'))
+
+  // Deepest first. codesign seals a bundle's contents into its own signature,
+  // so anything signed after its parent invalidates that parent.
+  targets.sort((a, b) => b.split(path.sep).length - a.split(path.sep).length)
+
+  for (const target of targets) {
     try {
       sign(target)
     } catch (error) {
-      // A handful of resources are not Mach-O and codesign rejects them; that's
-      // expected and harmless. A genuine failure surfaces on the --verify below.
-      const message = String(error.stderr || error.message)
-      if (!/is not a|bundle format unrecognized|does not contain/i.test(message)) {
-        console.warn(`[adhoc-sign] Skipped ${path.relative(appPath, target)}: ${message.trim()}`)
-      }
+      // Everything here was selected because it IS code, so a failure is real.
+      // The previous version warned and carried on, which is how a bundle with
+      // an unsigned framework got as far as the build output.
+      const detail = String(error.stderr || error.message).trim()
+      throw new Error(
+        `[adhoc-sign] Failed to sign ${path.relative(appPath, target)}\n${detail}`,
+      )
     }
   }
 
-  // Outer bundle last, so it seals the nested signatures computed above.
+  // Outer bundle last, sealing everything signed above.
   sign(appPath)
 
   // Fail the build rather than shipping another "damaged" download.
@@ -131,5 +198,13 @@ exports.default = async function adhocSign(context) {
     stdio: 'pipe',
   })
 
-  console.log(`[adhoc-sign] Signed and verified ${nested.length + 1} objects.`)
+  console.log(`[adhoc-sign] Signed and verified ${targets.length + 1} objects.`)
 }
+
+// Exported for tests/adhoc-sign.test.js — the collection and ordering rules are
+// what broke the x64 build, so they are covered directly rather than only
+// through a full macOS build.
+exports.isMachO = isMachO
+exports.collectSignTargets = collectSignTargets
+exports.orderDeepestFirst = (targets) =>
+  [...targets].sort((a, b) => b.split(path.sep).length - a.split(path.sep).length)

@@ -83,7 +83,15 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: ${{ matrix.command }}
+        run: |
+          # An unset GitHub secret arrives as an empty string, and
+          # electron-builder reads a defined-but-empty CSC_LINK as "a
+          # certificate is configured here", then fails resolving it as a path.
+          # Drop the empty ones so it correctly sees no credentials.
+          for var in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!var:-}" ]; then unset "$var"; fi
+          done
+          ${{ matrix.command }}
 
       # The whole point of the macOS work: an unsigned arm64 bundle is what
       # macOS reports as "damaged and can't be opened". Fail the build here
