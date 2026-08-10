@@ -1,19 +1,22 @@
 {
   "name": "unreleasd-presence-helper",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Electron helper for Discord Rich Presence integration",
   "main": "dist/main.js",
   "type": "commonjs",
   "scripts": {
     "dev": "tsc && electron .",
     "build:app": "tsc",
-    "build": "npm run build:app && electron-builder",
-    "pack": "npm run build:app && electron-builder --dir",
-    "dist:mac": "npm run build:app && electron-builder --mac",
-    "dist:win": "npm run build:app && electron-builder --win --x64 --ia32",
-    "dist:linux": "npm run build:app && electron-builder --linux",
-    "dist:all": "npm run build:app && electron-builder -mwl",
-    "typecheck": "tsc --noEmit"
+    "build": "npm run build:app && electron-builder --config electron-builder.config.js",
+    "pack": "npm run build:app && electron-builder --dir --config electron-builder.config.js",
+    "dist:mac": "npm run build:app && electron-builder --mac --config electron-builder.config.js",
+    "dist:mac:arm64": "npm run build:app && electron-builder --mac --arm64 --config electron-builder.config.js",
+    "dist:mac:x64": "npm run build:app && electron-builder --mac --x64 --config electron-builder.config.js",
+    "dist:win": "npm run build:app && electron-builder --win --x64 --ia32 --config electron-builder.config.js",
+    "dist:linux": "npm run build:app && electron-builder --linux --config electron-builder.config.js",
+    "dist:all": "npm run build:app && electron-builder -mwl --config electron-builder.config.js",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build:app && node --test tests/*.test.js"
   },
   "keywords": [
     "electron",
@@ -22,64 +25,6 @@
   ],
   "author": "Unreleasd",
   "license": "MIT",
-  "build": {
-    "appId": "world.unreleased.presence",
-    "productName": "Unreleased Presence",
-    "files": [
-      "dist/**/*",
-      "build/**/*",
-      "package.json",
-      ".env"
-    ],
-    "asar": true,
-    "directories": {
-      "buildResources": "build"
-    },
-    "mac": {
-      "category": "public.app-category.music",
-      "icon": "build/icon-mac.png",
-      "artifactName": "Unreleasd-Presence-${version}-${os}-${arch}.${ext}",
-      "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "arm64",
-            "x64"
-          ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "arm64",
-            "x64"
-          ]
-        }
-      ]
-    },
-    "win": {
-      "icon": "build/icon-win.ico",
-      "artifactName": "Unreleasd-Presence-${version}-${os}-${arch}.${ext}",
-      "target": [
-        "nsis",
-        "portable"
-      ]
-    },
-    "linux": {
-      "icon": "build",
-      "category": "AudioVideo",
-      "artifactName": "Unreleasd-Presence-${version}-${os}-${arch}.${ext}",
-      "target": [
-        "AppImage",
-        "deb",
-        "zip"
-      ]
-    },
-    "nsis": {
-      "oneClick": true,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": false
-    }
-  },
   "devDependencies": {
     "@types/node": "^20.11.0",
     "electron": "^30.0.0",

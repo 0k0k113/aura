@@ -94,10 +94,10 @@ export function createTray(
   }
 
   const tray = new Tray(icon)
-  tray.setToolTip('Unreleasd Presence')
+  tray.setToolTip('Unreleased Presence')
 
   const contextMenu = Menu.buildFromTemplate([
-    { label: 'Unreleasd Presence', enabled: false },
+    { label: 'Unreleased Presence', enabled: false },
     { type: 'separator' },
     {
       label: 'Open unreleasd.world',
@@ -115,7 +115,7 @@ export function createTray(
         try {
           if (rpc) rpc.clearActivity()
           new Notification({
-            title: 'Unreleasd Presence',
+            title: 'Unreleased Presence',
             body: 'Presence cache cleared'
           }).show()
         } catch (e) {
@@ -166,7 +166,7 @@ export function createTray(
             window.reload()
 
             new Notification({
-              title: 'Unreleasd Presence',
+              title: 'Unreleased Presence',
               body: 'All app data cleared'
             }).show()
           } catch (error) {

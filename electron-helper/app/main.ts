@@ -24,10 +24,14 @@ import { app, BrowserWindow, ipcMain, shell, Notification } from 'electron'
 import { DiscordRPC } from './rpc'
 import { createPresenceActivity } from './presence'
 import { createTray } from './tray'
+import { buildAllowedOrigins, isOriginAllowed, normalizeOrigin, ORIGINS_ARGV_PREFIX } from './origins'
 import { z } from 'zod'
 
 const START_URL = process.env.ELECTRON_APP_URL || 'https://unreleased.world'
-const ALLOWED_ORIGIN = START_URL
+
+// Apex and www are the same site. Comparing raw origin strings is what broke
+// presence before — see app/origins.ts for the full story.
+const ALLOWED_ORIGINS = buildAllowedOrigins(START_URL)
 
 let mainWindow: BrowserWindow | null = null
 let rpc: DiscordRPC | null = null
@@ -38,12 +42,40 @@ let lastIsPlaying: boolean | undefined
 const debugEnabled = process.env.UNRL_PRESENCE_LOG === '1'
 let seq = 0
 
+/**
+ * Presence updates arrive on every position tick — several times a second while
+ * a track plays. Logging them unconditionally flooded the console and kept a
+ * reference to every payload, so the whole IPC path is gated behind
+ * UNRL_PRESENCE_LOG=1.
+ */
+function debugLog(message: string, data?: unknown): void {
+  if (!debugEnabled) return
+  if (data === undefined) console.log(message)
+  else console.log(message, data)
+}
+
+// A zod object strips keys it doesn't declare. This schema used to omit
+// `album_type`, `album_tracks_count`, `is_single` and `track_image_url`, so
+// every single one of those fields was silently deleted between the preload
+// (which forwards them correctly) and `createPresenceActivity` (which needs
+// them to tell a single apart from an album). Single/album art selection
+// therefore always fell through to the weak "album title == track title"
+// heuristic. Every field the preload sends must be declared here.
 const presencePayloadSchema = z.object({
   context: z.enum(['browsing', 'artist', 'track', 'profile']).optional(),
   artist_name: z.string().max(128).optional(),
   artist_id: z.string().optional(),
   track_title: z.string().max(128).optional(),
   album_name: z.string().max(128).optional(),
+  album_type: z.string().max(128).optional(),
+  album_tracks_count: z.number().optional(),
+  is_single: z.boolean().optional(),
+  track_image_url: z.string().max(300).optional(),
+  // Resolved server-side from the admin-managed alias table. When present it
+  // wins over any key this process would derive from the artist/album name —
+  // that is the whole point of aliases (Discord rejects a lot of real titles).
+  asset_key: z.string().max(32).optional(),
+  asset_text: z.string().max(128).optional(),
   deep_link: z.string().optional(),
   timestamp: z.number().optional(),
   position_ms: z.number().optional(),
@@ -65,26 +97,37 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // The sandboxed preload cannot import ./origins (its `require` is a
+      // polyfill limited to a few Electron built-ins), so the allow-list
+      // travels as a process argument. One list, one owner, no drift.
+      additionalArguments: [ORIGINS_ARGV_PREFIX + JSON.stringify(ALLOWED_ORIGINS)],
       webSecurity: true,
       autoplayPolicy: 'no-user-gesture-required' as any,
       backgroundThrottling: false
     },
     backgroundColor: '#000000',
-    title: 'Unreleasd Presence'
+    title: 'Unreleased Presence'
   })
+
+  // Apex and www must both be listed: the site may redirect between them, and a
+  // CSP naming only one would block the other's scripts and styles outright.
+  const cspOrigins = ALLOWED_ORIGINS.flatMap((origin) => {
+    const withWww = origin.replace(/^(https?:\/\/)/, '$1www.')
+    return origin === withWww ? [origin] : [origin, withWww]
+  }).join(' ')
 
   mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          `default-src 'self' ${START_URL}; ` +
-          `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${START_URL}; ` +
-          `style-src 'self' 'unsafe-inline' ${START_URL}; ` +
+          `default-src 'self' ${cspOrigins}; ` +
+          `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${cspOrigins}; ` +
+          `style-src 'self' 'unsafe-inline' ${cspOrigins}; ` +
           `img-src 'self' data: https: blob:; ` +
-          `connect-src 'self' https: ws: wss: data: https://unreleased.world; ` +
-          `font-src 'self' data: ${START_URL}; ` +
-          `media-src 'self' https: data: blob: https://unreleased.world;`
+          `connect-src 'self' https: ws: wss: data:; ` +
+          `font-src 'self' data: ${cspOrigins}; ` +
+          `media-src 'self' https: data: blob:;`
         ]
       }
     })
@@ -122,17 +165,12 @@ function createWindow(): void {
   })
 
   mainWindow.webContents.on('will-navigate', (event, url) => {
-    try {
-      const parsedUrl = new URL(url)
-      const allowedUrl = new URL(ALLOWED_ORIGIN)
-
-      if (parsedUrl.origin !== allowedUrl.origin) {
-        event.preventDefault()
+    if (!isOriginAllowed(url, ALLOWED_ORIGINS)) {
+      event.preventDefault()
+      // Only hand genuine web URLs to the OS; never shell out on a parse failure.
+      if (normalizeOrigin(url)?.startsWith('http')) {
         shell.openExternal(url)
       }
-    } catch (error) {
-      console.error('[Main] Invalid URL in navigation:', error)
-      event.preventDefault()
     }
   })
 
@@ -152,11 +190,10 @@ function createWindow(): void {
 function setupIPC(): void {
   ipcMain.on('presence:update', (event, payload) => {
     try {
-      const senderOrigin = event.senderFrame.url
-      const allowedUrl = new URL(ALLOWED_ORIGIN)
-      const senderUrl = new URL(senderOrigin)
-
-      if (senderUrl.origin !== allowedUrl.origin) {
+      // `senderFrame` is nullable in Electron 30+ (the frame can be gone by the
+      // time the message is processed); fail closed if it is.
+      const senderOrigin = event.senderFrame?.url
+      if (!isOriginAllowed(senderOrigin, ALLOWED_ORIGINS)) {
         console.warn('[IPC] Presence update from disallowed origin:', senderOrigin)
         return
       }
@@ -177,9 +214,8 @@ function setupIPC(): void {
         timestamp: validated.data.timestamp ? Math.floor(validated.data.timestamp / 1000) : undefined
       }
 
-      // Enhanced logging for debugging
       const traceId = validated.data.trace_id
-      console.log(`[IPC:${traceId}] Received presence payload:`, {
+      debugLog(`[IPC:${traceId}] Received presence payload:`, {
         context: payloadWithConvertedTimestamp.context,
         track_title: payloadWithConvertedTimestamp.track_title,
         artist_name: payloadWithConvertedTimestamp.artist_name,
@@ -192,7 +228,7 @@ function setupIPC(): void {
       const activity = createPresenceActivity(currentUrl, payloadWithConvertedTimestamp)
 
       if (activity) {
-        console.log(`[IPC:${traceId}] Created Discord activity:`, {
+        debugLog(`[IPC:${traceId}] Created Discord activity:`, {
           name: activity.name,
           details: activity.details,
           largeImageKey: activity.largeImageKey,
@@ -235,7 +271,7 @@ function setupIPC(): void {
           validated.data.is_playing !== lastIsPlaying && lastIsPlaying !== undefined
 
         if (isTrackChange) {
-          console.log(
+          debugLog(
             `[IPC] Track change detected, bypassing throttle ${traceId ? `[${traceId}]` : ''}`
           )
           lastTrackId = currentTrackId
@@ -243,7 +279,7 @@ function setupIPC(): void {
           lastPosition = validated.data.position_ms ?? -1
           bypassThrottle = true
         } else if (isTrackEnd) {
-          console.log(
+          debugLog(
             `[IPC] Track end detected, bypassing throttle for next track or browsing ${
               traceId ? `[${traceId}]` : ''
             }`
@@ -253,7 +289,7 @@ function setupIPC(): void {
           lastPosition = -1
           bypassThrottle = true
         } else if (isBrowsingTransition) {
-          console.log(
+          debugLog(
             `[IPC] Browsing transition detected, bypassing throttle to clear timestamps ${
               traceId ? `[${traceId}]` : ''
             }`
@@ -263,14 +299,14 @@ function setupIPC(): void {
           lastPosition = -1
           bypassThrottle = true
         } else if (isSeek && validated.data.seek_seq !== undefined) {
-          console.log(
+          debugLog(
             `[IPC] Seek detected, bypassing throttle ${traceId ? `[${traceId}]` : ''}`
           )
           lastSeekSeq = validated.data.seek_seq
           lastPosition = validated.data.position_ms ?? -1
           bypassThrottle = true
         } else if (isSignificantJump) {
-          console.log(
+          debugLog(
             `[IPC] Significant position jump detected, bypassing throttle ${
               traceId ? `[${traceId}]` : ''
             }`
@@ -284,7 +320,7 @@ function setupIPC(): void {
         // Detect and bypass on pause/play transitions
         if (isPlayStateChange) {
           if (debugEnabled) {
-            console.log(
+            debugLog(
               `[IPC:${traceId}#${++seq}] Play state changed (${String(
                 lastIsPlaying
               )} → ${String(validated.data.is_playing)}), bypassing throttle`
@@ -362,7 +398,7 @@ function setupIPC(): void {
       mainWindow.reload()
 
       new Notification({
-        title: 'Unreleasd Presence',
+        title: 'Unreleased Presence',
         body: 'All app data cleared'
       }).show()
 

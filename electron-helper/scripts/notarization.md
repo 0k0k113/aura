@@ -35,14 +35,14 @@ From Keychain Access on your Mac:
 Add these secrets to your repository:
 
 - `APPLE_ID` - Your Apple ID email
-- `APPLE_PASSWORD` - App-specific password from step 1
+- `APPLE_APP_SPECIFIC_PASSWORD` - App-specific password from step 1
 - `APPLE_TEAM_ID` - Your team ID (found in Apple Developer dashboard)
 - `CSC_LINK` - Base64-encoded certificate from step 2
 - `CSC_KEY_PASSWORD` - Password for the `.p12` file
 
 ## Entitlements
 
-The app requires these entitlements (already configured in `builder.config.json`):
+The app requires these entitlements (in `build/entitlements.mac.plist`, applied automatically when a Developer ID is configured):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -65,7 +65,7 @@ If building locally:
 
 ```bash
 export APPLE_ID="your@email.com"
-export APPLE_PASSWORD="xxxx-xxxx-xxxx-xxxx"
+export APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"
 export APPLE_TEAM_ID="XXXXXXXXXX"
 
 npm run build
@@ -73,28 +73,35 @@ npm run build
 
 ## CI/CD Integration
 
-The GitHub Actions workflow (`.github/workflows/electron-release.yml`) handles signing and notarization automatically when the secrets are configured.
+`.github/workflows/release-electron-helper.yml` handles signing and notarization automatically once the secrets above are configured. Without them the build still succeeds — it falls back to ad-hoc signing (see `BUILD.md`), which is enough for Apple Silicon to launch the app but still shows the unidentified-developer prompt.
 
 ## Troubleshooting
 
 ### "App is damaged and can't be opened"
 
-This means the app wasn't properly signed or notarized. Users need to:
+This is a **missing or invalid code signature**, not corruption. Apple Silicon
+refuses to load unsigned binaries outright, and the quarantine attribute that
+GitHub Releases downloads carry turns that refusal into this message.
+
+Since `scripts/adhoc-sign.js` was added, every macOS build carries at least an
+ad-hoc signature and CI fails if verification doesn't pass, so new builds should
+never produce this. If a user on an older download hits it:
 
 ```bash
-xattr -cr /Applications/Unreleasd\ Presence.app
+xattr -dr com.apple.quarantine "/Applications/Unreleased Presence.app"
 ```
 
-Or you need to properly sign and notarize the build.
+Notarizing properly removes the prompt entirely.
 
 ### Notarization Failed
 
 Check the notarization log:
 
 ```bash
-xcrun altool --notarization-info <REQUEST_UUID> \
-  --username "your@email.com" \
-  --password "@keychain:AC_PASSWORD"
+xcrun notarytool log <SUBMISSION_ID> \
+  --apple-id "your@email.com" \
+  --password "xxxx-xxxx-xxxx-xxxx" \
+  --team-id "XXXXXXXXXX"
 ```
 
 Common issues:
