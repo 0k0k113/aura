@@ -48,11 +48,16 @@ test('asset_key wins for artist browsing too', () => {
   assert.equal(activity.largeImageKey, 'artist_carti_alt')
 })
 
-test('asset_text overrides the hover text', () => {
-  const activity = createPresenceActivity(HOME, playing({
+test('asset_text overrides the hover text when browsing (not mid-track)', () => {
+  // Every alias in use is an album whose display text IS the album title, and
+  // Discord paints large_text inside the now-playing card — so a PLAYING track
+  // withholds it (see the no-album-name test below). Browsing still uses it.
+  const activity = createPresenceActivity(HOME, {
+    context: 'artist',
+    artist_name: 'Playboi Carti',
     asset_key: 'album_safe_key',
     asset_text: 'The Real Album Title',
-  }))
+  })
   assert.equal(activity.largeImageText, 'The Real Album Title')
 })
 
@@ -232,14 +237,35 @@ test('the artist appears exactly ONCE — no stacked duplicate row', () => {
   }
 })
 
-test('the art is labelled with the album, and never re-states the track title', () => {
-  const album = createPresenceActivity(HOME, playing({ album_name: 'Die Lit', is_single: false }))
-  assert.equal(album.largeImageText, 'Die Lit')
+test('a playing track shows NO album name anywhere in the card', () => {
+  // Discord draws large_text inside the now-playing card, not only on hover,
+  // so the album name must not travel in it while a track is playing. The
+  // album still selects the ART — it just is not printed.
+  const cases = [
+    // [payload, the art key the album should still select]
+    [{ album_name: 'Die Lit', is_single: false }, 'album_die_lit'],
+    [
+      { album_name: 'Whole Lotta Red', is_single: false, asset_key: 'album_wlr', asset_text: 'Whole Lotta Red' },
+      'album_wlr',
+    ],
+    // The shape that made this necessary: a real alias whose display text is
+    // the album title (Discord refuses titles like this as asset names).
+    [{ album_name: 'Forever, ILY', is_single: false, asset_text: 'Forever, ILY' }, 'album_forever_ily'],
+  ]
+  for (const [extra, expectedKey] of cases) {
+    const activity = createPresenceActivity(HOME, playing(extra))
+    const printed = [activity.details, activity.state, activity.largeImageText]
+    assert.ok(
+      !printed.includes(extra.album_name),
+      `album name leaked for ${JSON.stringify(extra)} → ${JSON.stringify(printed)}`,
+    )
+    // The album still selects the ART — it just is not printed.
+    assert.equal(activity.largeImageKey, expectedKey)
+  }
+})
 
-  // A single's album_name IS the track title, which `details` already shows.
-  const single = createPresenceActivity(HOME, playing({ album_name: 'Some Song', is_single: true }))
-  assert.equal(single.largeImageText, 'unreleased.world')
-  assert.notEqual(single.largeImageText, single.details)
+test('a playing track carries no cover-art text at all', () => {
+  assert.equal(createPresenceActivity(HOME, playing()).largeImageText, undefined)
 })
 
 test('a track with no artist keeps the old member-list text rather than going blank', () => {
