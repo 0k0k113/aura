@@ -193,3 +193,54 @@ test('activity is always reported as Listening to unreleased.world', () => {
   assert.equal(activity.name, 'unreleased.world')
   assert.equal(activity.type, 2)
 })
+
+// ---------------------------------------------------------------------------
+// Member list line
+//
+// Collapsed in the member list, Discord shows ONE line next to the 🎵. It
+// reads whichever field statusDisplayType points at, defaulting to the
+// activity name — which is why every listener used to read "unreleased.world".
+// ---------------------------------------------------------------------------
+
+test('a playing track shows the ARTIST in the member list, not unreleased.world', () => {
+  const activity = createPresenceActivity(HOME, playing())
+  assert.equal(activity.statusDisplayType, 1) // STATE
+  assert.equal(activity.state, 'Playboi Carti')
+  // The expanded card header is unchanged.
+  assert.equal(activity.name, 'unreleased.world')
+  assert.equal(activity.details, 'Some Song')
+})
+
+test('the artist is cleaned the same way the art key is', () => {
+  const activity = createPresenceActivity(HOME, playing({ artist_name: 'ken-carson' }))
+  assert.equal(activity.state, 'Ken Carson')
+})
+
+test('a track with no artist keeps the old member-list text rather than going blank', () => {
+  // Discord falls back to the activity name when the chosen field is empty,
+  // so leaving statusDisplayType off here is what preserves today's behaviour.
+  const activity = createPresenceActivity(HOME, {
+    context: 'track',
+    track_title: 'Some Song',
+    is_playing: true,
+  })
+  assert.equal(activity.state, undefined)
+  assert.equal(activity.statusDisplayType, undefined)
+})
+
+test('pausing leaves the member list exactly as it was before this change', () => {
+  // Pausing already reclassified the presence to `artist` ("Browsing" + the
+  // artist's art) long before the member-list line moved. That path is
+  // deliberately untouched here — the artist name replaces "unreleased.world"
+  // while a track is PLAYING, which is the only case that was asked for.
+  const activity = createPresenceActivity(HOME, playing({ is_playing: false }))
+  assert.equal(activity.statusDisplayType, undefined)
+  assert.equal(activity.details, 'Browsing')
+})
+
+test('browsing still reads unreleased.world in the member list', () => {
+  for (const payload of [{ context: 'browsing' }, { context: 'profile' }]) {
+    const activity = createPresenceActivity(HOME, payload)
+    assert.equal(activity.statusDisplayType, undefined, `${payload.context} changed`)
+  }
+})

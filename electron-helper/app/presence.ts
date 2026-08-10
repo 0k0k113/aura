@@ -300,7 +300,11 @@ export function createPresenceActivity(
           largeImageText = APP_NAME
         } else {
           details = truncate(track_title || 'Untitled', 128)
-          state = undefined
+          // The artist doubles as the MEMBER LIST line — see statusDisplayType
+          // below. Discord reads that line from a real activity field, so the
+          // artist has to travel in `state`; it also renders under the track
+          // title in the expanded card, the way every music app shows it.
+          state = cleanedArtist
           // Resolve against `merged`, not the raw payload: URL-derived context
           // carries the artist when the caller omitted it.
           largeImageKey = getTrackImageKey(merged)
@@ -329,6 +333,19 @@ export function createPresenceActivity(
       state: state ? truncate(state, 128) : undefined,
       largeImageKey,
       largeImageText: truncate(resolvedImageText, 128)
+    }
+
+    // Member list, next to the 🎵 — the one line Discord shows when the card
+    // is collapsed. It defaults to the activity NAME, which made everyone
+    // playing anything read "unreleased.world"; pointing it at STATE shows the
+    // artist instead, the way Spotify shows who you're listening to. Only
+    // while a track is playing, and only when there IS an artist: Discord
+    // falls back to the name when the chosen field is empty, so a track with
+    // no artist keeps today's behaviour rather than rendering blank.
+    // The expanded card is untouched — its header still reads
+    // "Listening to unreleased.world" (that comes from `name`).
+    if (context === 'track' && presence.state) {
+      presence.statusDisplayType = 1 // StatusDisplayType.STATE
     }
 
     if (context === 'track') {
@@ -363,6 +380,7 @@ export function createPresenceActivity(
       state: presence.state || '(empty)',
       img: presence.largeImageKey,
       imgTxt: presence.largeImageText,
+      memberList: presence.statusDisplayType === 1 ? presence.state : presence.name,
       hasTimer: !!(presence as any).startTimestamp
     }, trace_id)
 
