@@ -210,15 +210,32 @@ test('activity is always reported as Listening to unreleased.world', () => {
 test('a playing track shows the ARTIST in the member list, not unreleased.world', () => {
   const activity = createPresenceActivity(HOME, playing())
   assert.equal(activity.statusDisplayType, 1) // STATE
-  assert.equal(activity.state, 'Playboi Carti')
+  assert.equal(activity.state, 'playboi carti')
   // The expanded card header is unchanged.
   assert.equal(activity.name, 'unreleased.world')
   assert.equal(activity.details, 'Some Song')
 })
 
-test('the artist is cleaned the same way the art key is', () => {
-  const activity = createPresenceActivity(HOME, playing({ artist_name: 'ken-carson' }))
-  assert.equal(activity.state, 'Ken Carson')
+test('the now-playing artist is always lowercase', () => {
+  for (const [input, expected] of [
+    ['Playboi Carti', 'playboi carti'],
+    ['ken-carson', 'ken carson'],
+    ['A$AP Rocky', 'a$ap rocky'],
+    ['YEAT', 'yeat'],
+  ]) {
+    const activity = createPresenceActivity(HOME, playing({ artist_name: input }))
+    assert.equal(activity.state, expected, `artist casing wrong for ${input}`)
+  }
+})
+
+test('lowercasing applies to the ARTIST only — the track title keeps its casing', () => {
+  const activity = createPresenceActivity(HOME, playing({
+    track_title: 'Sky IS THE Limit',
+    artist_name: 'Playboi Carti',
+  }))
+  assert.equal(activity.details, 'Sky IS THE Limit')
+  assert.equal(activity.state, 'playboi carti')
+  assert.equal(activity.name, 'unreleased.world')
 })
 
 test('the artist appears exactly ONCE — no stacked duplicate row', () => {
@@ -232,7 +249,7 @@ test('the artist appears exactly ONCE — no stacked duplicate row', () => {
   ]) {
     const activity = createPresenceActivity(HOME, playing(extra))
     const shown = [activity.state, activity.details, activity.largeImageText]
-    const artistCount = shown.filter((v) => v === 'Playboi Carti').length
+    const artistCount = shown.filter((v) => v?.toLowerCase() === 'playboi carti').length
     assert.equal(artistCount, 1, `artist rendered ${artistCount}× for ${JSON.stringify(extra)}`)
   }
 })
