@@ -42,6 +42,19 @@ let lastIsPlaying: boolean | undefined
 const debugEnabled = process.env.UNRL_PRESENCE_LOG === '1'
 let seq = 0
 
+// Diagnostics for `presence:ping`. Without these, "presence isn't working" is
+// unanswerable: there is no way to tell whether the web app never called, the
+// origin gate rejected it, or Discord refused the activity.
+const diagnostics = {
+  updatesReceived: 0,
+  updatesRejectedOrigin: 0,
+  updatesRejectedSchema: 0,
+  activitiesBuilt: 0,
+  lastPayloadAt: null as number | null,
+  lastActivity: null as { details?: string; largeImageKey?: string } | null,
+  lastRejection: null as string | null,
+}
+
 /**
  * Presence updates arrive on every position tick — several times a second while
  * a track plays. Logging them unconditionally flooded the console and kept a
@@ -192,19 +205,27 @@ function setupIPC(): void {
     try {
       // `senderFrame` is nullable in Electron 30+ (the frame can be gone by the
       // time the message is processed); fail closed if it is.
+      diagnostics.updatesReceived++
+      diagnostics.lastPayloadAt = Date.now()
+
       const senderOrigin = event.senderFrame?.url
       if (!isOriginAllowed(senderOrigin, ALLOWED_ORIGINS)) {
+        diagnostics.updatesRejectedOrigin++
+        diagnostics.lastRejection = `origin not allowed: ${senderOrigin}`
         console.warn('[IPC] Presence update from disallowed origin:', senderOrigin)
         return
       }
 
       const validated = presencePayloadSchema.safeParse(payload)
       if (!validated.success) {
-        console.warn('[IPC] Invalid presence payload:', validated.error)
+        diagnostics.updatesRejectedSchema++
+        diagnostics.lastRejection = `schema: ${validated.error.issues.map(i => `${i.path.join('.')} ${i.message}`).join('; ')}`
+        console.warn('[IPC] Invalid presence payload:', diagnostics.lastRejection)
         return
       }
 
       if (!rpc) {
+        diagnostics.lastRejection = 'Discord RPC not initialized (missing DISCORD_CLIENT_ID?)'
         console.warn('[IPC] RPC not initialized')
         return
       }
@@ -228,6 +249,11 @@ function setupIPC(): void {
       const activity = createPresenceActivity(currentUrl, payloadWithConvertedTimestamp)
 
       if (activity) {
+        diagnostics.activitiesBuilt++
+        diagnostics.lastActivity = {
+          details: activity.details,
+          largeImageKey: activity.largeImageKey,
+        }
         debugLog(`[IPC:${traceId}] Created Discord activity:`, {
           name: activity.name,
           details: activity.details,
@@ -352,8 +378,16 @@ function setupIPC(): void {
 
   ipcMain.handle('presence:ping', () => {
     return {
+      // Kept for compatibility with older web builds.
       origin: START_URL,
-      hasDiscord: !!rpc && rpc.isReady()
+      hasDiscord: !!rpc && rpc.isReady(),
+
+      allowedOrigins: ALLOWED_ORIGINS,
+      discord: rpc
+        ? rpc.getStatus()
+        : { connected: false, reason: 'RPC not initialized — DISCORD_CLIENT_ID missing from the build' },
+      bridge: { ...diagnostics },
+      appVersion: app.getVersion(),
     }
   })
 

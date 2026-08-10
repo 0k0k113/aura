@@ -1,5 +1,5 @@
 // app/tray.ts
-import { Tray, Menu, BrowserWindow, nativeImage, Notification } from 'electron'
+import { Tray, Menu, BrowserWindow, nativeImage, Notification, clipboard } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs'
 import { DiscordRPC } from './rpc'
@@ -96,8 +96,35 @@ export function createTray(
   const tray = new Tray(icon)
   tray.setToolTip('Unreleased Presence')
 
-  const contextMenu = Menu.buildFromTemplate([
+  // Presence failing used to be entirely invisible — no window, no devtools,
+  // no indicator. The status line below is the one place a user can look.
+  const describeStatus = (): string => {
+    if (!rpc) return 'Discord: unavailable (build is missing DISCORD_CLIENT_ID)'
+    const status = rpc.getStatus()
+    if (!status.connected) return 'Discord: not connected — is Discord running?'
+    if (!status.hasUser) return 'Discord: connected, but not identified — restart Discord'
+    if (status.activitiesSent === 0) return 'Discord: connected — waiting for the site to send'
+    return `Discord: active (${status.activitiesSent} updates sent)`
+  }
+
+  const buildMenu = () => Menu.buildFromTemplate([
     { label: 'Unreleased Presence', enabled: false },
+    { label: describeStatus(), enabled: false },
+    {
+      label: 'Copy diagnostics',
+      click: () => {
+        const report = {
+          appVersion: require('electron').app.getVersion(),
+          url: window?.webContents?.getURL() ?? null,
+          discord: rpc ? rpc.getStatus() : { connected: false, reason: 'RPC not initialized' },
+        }
+        clipboard.writeText(JSON.stringify(report, null, 2))
+        new Notification({
+          title: 'Unreleased Presence',
+          body: 'Diagnostics copied to the clipboard',
+        }).show()
+      },
+    },
     { type: 'separator' },
     {
       label: 'Open unreleasd.world',
@@ -179,7 +206,21 @@ export function createTray(
     { label: 'Quit', role: 'quit' }
   ])
 
-  tray.setContextMenu(contextMenu)
+  tray.setContextMenu(buildMenu())
+
+  // Rebuild so the status line reflects reality rather than start-up state.
+  const statusTimer = setInterval(() => {
+    if (tray.isDestroyed()) {
+      clearInterval(statusTimer)
+      return
+    }
+    try {
+      tray.setContextMenu(buildMenu())
+      tray.setToolTip(`Unreleased Presence — ${describeStatus()}`)
+    } catch {
+      clearInterval(statusTimer)
+    }
+  }, 5000)
 
   tray.on('click', () => {
     if (window) {
