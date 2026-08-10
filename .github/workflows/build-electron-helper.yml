@@ -39,14 +39,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: macOS arm64
+          # One macOS job builds BOTH architectures: electron-builder
+          # cross-packages darwin-x64 on an Apple Silicon runner, and codesign
+          # is arch-agnostic, so the Intel bundle is signed and verified here
+          # too. A separate macos-13 job added nothing and queued forever —
+          # GitHub is retiring that image.
+          - name: macOS (Apple Silicon + Intel)
             os: macos-latest
-            artifact: macos-arm64
-            command: npm run dist:mac:arm64
-          - name: macOS Intel
-            os: macos-13
-            artifact: macos-intel
-            command: npm run dist:mac:x64
+            artifact: macos
+            command: npm run dist:mac
           - name: Windows
             os: windows-latest
             artifact: windows
@@ -100,15 +101,22 @@ jobs:
         if: startsWith(matrix.os, 'macos')
         shell: bash
         run: |
-          APP=$(find release/mac* -maxdepth 1 -name "*.app" -print -quit)
-          if [ -z "$APP" ]; then
+          # Verify EVERY bundle produced, not just the first one found — this
+          # job builds both arm64 and Intel, and a `-print -quit` find left one
+          # of them unchecked.
+          found=0
+          for APP in release/mac*/*.app; do
+            [ -d "$APP" ] || continue
+            found=$((found + 1))
+            echo "── Verifying $APP"
+            codesign --verify --deep --strict --verbose=2 "$APP"
+            codesign --display --verbose=2 "$APP" 2>&1 | grep -E "^(Signature|Identifier|TeamIdentifier)" || true
+          done
+          if [ "$found" -eq 0 ]; then
             echo "::error::No .app bundle produced"
             exit 1
           fi
-          echo "Verifying $APP"
-          codesign --verify --deep --strict --verbose=2 "$APP"
-          codesign --display --verbose=2 "$APP" 2>&1 | grep -E "Signature|Identifier|TeamIdentifier" || true
-          echo "✅ Signature valid — this bundle will not be reported as damaged."
+          echo "✅ $found bundle(s) verified — these will not be reported as damaged."
 
       - uses: actions/upload-artifact@v4
         with:
