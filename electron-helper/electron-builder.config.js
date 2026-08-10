@@ -122,6 +122,13 @@ module.exports = {
     category: 'AudioVideo',
     artifactName: 'Unreleased-Presence-${os}-${arch}.${ext}',
     target: ['AppImage', 'deb', 'zip'],
+    // Required by the deb target — fpm refuses to build a package without a
+    // maintainer, which failed the Linux job with
+    // "It is required to set Linux .deb package maintainer".
+    maintainer: 'unreleased.world <support@unreleased.world>',
+    synopsis: 'Discord Rich Presence for unreleased.world',
+    description:
+      'Shows what you are listening to on unreleased.world on your Discord profile.',
   },
 
   // Releases are published by .github/workflows/release-electron-helper.yml,

@@ -23,7 +23,10 @@
     "discord",
     "rich-presence"
   ],
-  "author": "Unreleasd",
+  "author": {
+    "name": "unreleased.world",
+    "email": "support@unreleased.world"
+  },
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^20.11.0",
@@ -35,5 +38,10 @@
     "@xhayper/discord-rpc": "^1.1.2",
     "dotenv": "^16.4.0",
     "zod": "^3.22.0"
+  },
+  "homepage": "https://unreleased.world",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/0k0k113/aura.git"
   }
 }
