@@ -308,7 +308,14 @@ export function createPresenceActivity(
           // Resolve against `merged`, not the raw payload: URL-derived context
           // carries the artist when the caller omitted it.
           largeImageKey = getTrackImageKey(merged)
-          largeImageText = cleanedArtist || APP_NAME
+          // NOT the artist. This field used to carry it, back when it was the
+          // only place the artist appeared; now that `state` shows the artist
+          // as its own row, repeating it here rendered the name TWICE, stacked.
+          // Label the art with what the art actually is — the album — and skip
+          // it for singles, whose album_name is just the track title again
+          // (which `details` already shows). An alias's `asset_text` still
+          // overrides this, so admin-set hover text is unaffected.
+          largeImageText = (!isSingleTrack(merged) && merged.album_name?.trim()) || APP_NAME
         }
         break
 

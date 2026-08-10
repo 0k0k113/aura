@@ -216,6 +216,32 @@ test('the artist is cleaned the same way the art key is', () => {
   assert.equal(activity.state, 'Ken Carson')
 })
 
+test('the artist appears exactly ONCE — no stacked duplicate row', () => {
+  // Regression: `largeImageText` already carried the artist from back when it
+  // was the only place the artist showed. Adding `state` without clearing it
+  // put the same name in two rendered fields, and Discord stacked them.
+  for (const extra of [
+    { album_name: 'Die Lit', is_single: false },
+    { album_name: 'Some Song', is_single: true },
+    {},
+  ]) {
+    const activity = createPresenceActivity(HOME, playing(extra))
+    const shown = [activity.state, activity.details, activity.largeImageText]
+    const artistCount = shown.filter((v) => v === 'Playboi Carti').length
+    assert.equal(artistCount, 1, `artist rendered ${artistCount}× for ${JSON.stringify(extra)}`)
+  }
+})
+
+test('the art is labelled with the album, and never re-states the track title', () => {
+  const album = createPresenceActivity(HOME, playing({ album_name: 'Die Lit', is_single: false }))
+  assert.equal(album.largeImageText, 'Die Lit')
+
+  // A single's album_name IS the track title, which `details` already shows.
+  const single = createPresenceActivity(HOME, playing({ album_name: 'Some Song', is_single: true }))
+  assert.equal(single.largeImageText, 'unreleased.world')
+  assert.notEqual(single.largeImageText, single.details)
+})
+
 test('a track with no artist keeps the old member-list text rather than going blank', () => {
   // Discord falls back to the activity name when the chosen field is empty,
   // so leaving statusDisplayType off here is what preserves today's behaviour.
