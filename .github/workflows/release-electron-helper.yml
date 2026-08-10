@@ -104,7 +104,7 @@ jobs:
           fi
           codesign --verify --deep --strict --verbose=2 "$APP"
           if codesign --display --verbose=2 "$APP" 2>&1 | grep -q "TeamIdentifier=not set"; then
-            echo "::warning::Ad-hoc signed only. The app launches on Apple Silicon but users still need right-click → Open once. Add CSC_LINK + APPLE_* secrets to notarize."
+            echo "::warning::Ad-hoc signed only (no Developer ID). Launches fine on Apple Silicon; browser downloads still need one approval via System Settings → Privacy & Security. The curl installer avoids that entirely. Add CSC_LINK + APPLE_* secrets to notarize."
           else
             echo "✅ Developer ID signed."
           fi
@@ -149,33 +149,48 @@ jobs:
           TAG: ${{ steps.tag.outputs.name }}
         run: |
           cat > notes.md <<'NOTES'
-          ## Install
+          ## Install on macOS — one command, no security prompts
 
-          **macOS (Apple Silicon — M1/M2/M3/M4):** download the `arm64` `.dmg`.
-          **macOS (Intel):** download the `x64` `.dmg`.
-          **Windows:** download the `.exe`.
+          ```
+          curl -fsSL https://unreleased.world/install.sh | sh
+          ```
 
-          ### First launch on macOS
+          Paste that into Terminal. It picks the right build for your Mac,
+          verifies the app's signature, installs it and opens it.
 
-          These builds are signed so that macOS will run them, but they are not
-          notarized by Apple. The first launch therefore needs one extra step:
+          Why this is the easy path: these builds are code-signed but not
+          notarized by Apple (notarization needs a paid Developer account).
+          Anything a **browser** downloads gets tagged with macOS's quarantine
+          flag, and Gatekeeper won't open a non-notarized app carrying that tag
+          without a trip through System Settings. `curl` doesn't set that tag.
+          The script is short and commented — read it at
+          https://unreleased.world/install.sh before running it.
 
-          **Right-click the app → Open → Open.**
+          ### Or download the app directly
 
-          Double-clicking shows "Apple cannot check it for malicious software"
-          with no Open button; right-click → Open is what gives you that button.
-          You only have to do it once.
+          - **Apple Silicon (M1–M4):** `Unreleased-Presence-mac-arm64.dmg`
+          - **Intel Mac:** `Unreleased-Presence-mac-x64.dmg`
+          - **Windows:** `Unreleased-Presence-win-x64.exe`
 
-          If macOS instead says the app **"is damaged and can't be opened"**,
-          the quarantine flag is stuck. Clear it with:
+          Drag it to Applications, double-click, then allow it in
+          **System Settings → Privacy & Security → "Open Anyway"**.
+          (On macOS 14 and earlier you can instead right-click → Open. Apple
+          removed that shortcut in macOS 15.)
 
-          ```bash
+          ### "It says the app is damaged"
+
+          It isn't. That message means macOS found no valid signature, and it
+          came from older builds that shipped completely unsigned — which Apple
+          Silicon refuses to run. **This release is signed**, so downloading it
+          fixes the problem. If it somehow persists:
+
+          ```
           xattr -dr com.apple.quarantine "/Applications/Unreleased Presence.app"
           ```
 
           ### Requirements
 
-          - macOS 11 (Big Sur) or newer
+          - macOS 11 (Big Sur) or newer, or Windows 10/11
           - The Discord desktop app running on the same machine
           NOTES
 
