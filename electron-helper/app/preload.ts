@@ -1,6 +1,51 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
-const ALLOWED_ORIGIN = 'https://www.unreleased.world'
+// This preload runs sandboxed, so it cannot `require('./origins')` — its
+// `require` is a polyfill covering only a few Electron built-ins. The main
+// process therefore hands the allow-list over as a process argument, keeping
+// exactly one owner for the list. See app/origins.ts for why this matters:
+// a hardcoded copy here drifted from main.ts and silently killed all presence.
+const ORIGINS_ARGV_PREFIX = '--unrl-allowed-origins='
+
+/** Must stay behaviourally identical to normalizeOrigin() in app/origins.ts. */
+function normalizeOrigin(value: string | undefined | null): string | null {
+  if (!value) return null
+  try {
+    const url = new URL(value)
+    // Only the web schemes normalize. `javascript:`, `file:` and friends parse
+    // happily and would otherwise yield a comparable string.
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null
+    const host = url.hostname.toLowerCase().replace(/^www\./, '')
+    if (!host) return null
+    const port = url.port ? `:${url.port}` : ''
+    return `${url.protocol}//${host}${port}`
+  } catch {
+    return null
+  }
+}
+
+function readAllowedOrigins(): string[] {
+  const arg = process.argv.find((a) => a.startsWith(ORIGINS_ARGV_PREFIX))
+  if (arg) {
+    try {
+      const parsed = JSON.parse(arg.slice(ORIGINS_ARGV_PREFIX.length))
+      if (Array.isArray(parsed) && parsed.every((o) => typeof o === 'string')) {
+        return parsed
+      }
+    } catch {
+      // fall through to the built-in list
+    }
+  }
+  // Fallback only — reached if main failed to pass the argument at all.
+  return ['https://unreleased.world', 'http://localhost:3000']
+}
+
+const ALLOWED_ORIGINS = readAllowedOrigins()
+
+function isCurrentOriginAllowed(): boolean {
+  const normalized = normalizeOrigin(window.location.origin)
+  return normalized !== null && ALLOWED_ORIGINS.includes(normalized)
+}
 
 interface PresencePayload {
   context?: 'browsing' | 'artist' | 'track' | 'profile'
@@ -56,6 +101,11 @@ const DEBUG_ENABLED = process.env.UNRL_PRESENCE_DEBUG === '1'
 let lastDebugLog = 0
 const DEBUG_DEBOUNCE_MS = 5000
 
+function debugLog(message: string, data?: unknown): void {
+  if (!DEBUG_ENABLED) return
+  console.log(`[RP:Preload] ${message}`, data)
+}
+
 function normalizePayload(input: any): any {
   // Accept both camelCase and snake_case, normalize to snake_case for main
   const artist_name = input.artist_name || input.artistName
@@ -73,6 +123,10 @@ function normalizePayload(input: any): any {
   const track_id = input.track_id || input.trackId
   const deep_link = input.deep_link || input.deepLink
   const trace_id = input.trace_id || input.traceId
+  // Alias-resolved Discord asset name + hover text, decided by the web app from
+  // the admin-managed alias table.
+  const asset_key = input.asset_key || input.assetKey
+  const asset_text = input.asset_text || input.assetText
 
   // CRITICAL: Prioritize explicit context over inference
   // If input.context is explicitly set, use it (including 'artist' and 'track')
@@ -116,6 +170,8 @@ function normalizePayload(input: any): any {
     album_tracks_count,
     is_single,
     track_image_url,
+    asset_key,
+    asset_text,
     deep_link,
     timestamp: input.timestamp,
     position_ms,
@@ -127,17 +183,27 @@ function normalizePayload(input: any): any {
   }
 }
 
+/**
+ * Discord asset names are `[a-z0-9_-]`, max 32 chars. Anything else is rejected
+ * by the Discord client, which then renders no art at all — so drop a malformed
+ * key here and let the main process fall back to its derived key instead.
+ */
+function sanitizeAssetKey(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim().toLowerCase()
+  if (!trimmed || trimmed.length > 32) return undefined
+  return /^[a-z0-9_-]+$/.test(trimmed) ? trimmed : undefined
+}
+
 const unrlPresenceAPI = {
   update: (payload: unknown): void => {
-    console.log('[RP:Preload] ========== UPDATE CALLED ==========')
-    console.log('[RP:Preload] Payload received:', payload)
+    // These fire on every position tick (multiple times a second while
+    // playing). Unconditional logging here flooded the console and kept a
+    // reference to every payload; gate it behind UNRL_PRESENCE_DEBUG=1.
+    debugLog('update() called', payload)
     try {
-      const currentOrigin = window.location.origin
-      console.log('[RP:Preload] Current origin:', currentOrigin)
-      console.log('[RP:Preload] Allowed origin:', ALLOWED_ORIGIN)
-
-      if (currentOrigin !== ALLOWED_ORIGIN) {
-        console.warn('[Presence] Blocked: Origin not allowed:', currentOrigin)
+      if (!isCurrentOriginAllowed()) {
+        console.warn('[Presence] Blocked: origin not allowed:', window.location.origin)
         return
       }
 
@@ -160,7 +226,7 @@ const unrlPresenceAPI = {
       }
 
       const normalized = normalizePayload(data)
-      console.log('[RP:Preload] Normalized payload:', normalized)
+      debugLog('normalized payload', normalized)
 
       // Validate track_image_url if present: must be HTTPS and ≤300 chars
       let validatedImageUrl = normalized.track_image_url
@@ -183,6 +249,8 @@ const unrlPresenceAPI = {
         album_tracks_count: typeof normalized.album_tracks_count === 'number' ? normalized.album_tracks_count : undefined,
         is_single: typeof normalized.is_single === 'boolean' ? normalized.is_single : undefined,
         track_image_url: validatedImageUrl,
+        asset_key: sanitizeAssetKey(normalized.asset_key),
+        asset_text: truncateString(normalized.asset_text, 128),
         deep_link: normalized.deep_link,
         timestamp: typeof normalized.timestamp === 'number' ? normalized.timestamp : undefined,
         position_ms: typeof normalized.position_ms === 'number' ? normalized.position_ms : undefined,
@@ -193,9 +261,8 @@ const unrlPresenceAPI = {
         trace_id: normalized.trace_id,
       }
 
-      console.log('[RP:Preload] Sending to main process:', sanitized)
+      debugLog('sending to main', sanitized)
       ipcRenderer.send('presence:update', sanitized)
-      console.log('[RP:Preload] Successfully sent to IPC')
     } catch (error) {
       console.error('[Presence] Error sending update:', error)
     }
@@ -203,9 +270,8 @@ const unrlPresenceAPI = {
 
   clear: (): void => {
     try {
-      const currentOrigin = window.location.origin
-      if (currentOrigin !== ALLOWED_ORIGIN) {
-        console.warn('[Presence] Blocked: Origin not allowed:', currentOrigin)
+      if (!isCurrentOriginAllowed()) {
+        console.warn('[Presence] Blocked: origin not allowed:', window.location.origin)
         return
       }
 
@@ -228,9 +294,12 @@ const unrlPresenceAPI = {
 
 contextBridge.exposeInMainWorld('unrlPresence', unrlPresenceAPI)
 
-console.log('[RP:Preload] ✅ Electron bridge exposed to window.unrlPresence')
-console.log('[RP:Preload] Allowed origin:', ALLOWED_ORIGIN)
-console.log('[RP:Preload] Bridge API methods:', Object.keys(unrlPresenceAPI))
+// Kept unconditional: one line at load, and it's the first thing to check when
+// someone reports "presence isn't showing up".
+console.log(
+  `[RP:Preload] Bridge exposed on window.unrlPresence — origin ${window.location.origin} ` +
+    `is ${isCurrentOriginAllowed() ? 'allowed' : 'BLOCKED'} (allowed: ${ALLOWED_ORIGINS.join(', ')})`,
+)
 
 declare global {
   interface Window {

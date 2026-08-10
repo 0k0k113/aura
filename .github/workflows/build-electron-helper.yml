@@ -4,144 +4,111 @@ on:
   push:
     paths:
       - "electron-helper/**"
+      - ".github/workflows/build-electron-helper.yml"
+  pull_request:
+    paths:
+      - "electron-helper/**"
+      - ".github/workflows/build-electron-helper.yml"
   workflow_dispatch: {}
 
+defaults:
+  run:
+    working-directory: electron-helper
+
 jobs:
-  build-windows:
-    name: Build Windows (x64 + x86)
-    runs-on: windows-latest
+  # Fast feedback: typecheck + unit tests before spending macOS runner minutes.
+  verify:
+    name: Typecheck & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: electron-helper/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
 
-    defaults:
-      run:
-        working-directory: electron-helper
+  build:
+    name: Build ${{ matrix.name }}
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            os: macos-latest
+            artifact: macos-arm64
+            command: npm run dist:mac:arm64
+          - name: macOS Intel
+            os: macos-13
+            artifact: macos-intel
+            command: npm run dist:mac:x64
+          - name: Windows
+            os: windows-latest
+            artifact: windows
+            command: npm run dist:win
+          - name: Linux
+            os: ubuntu-latest
+            artifact: linux
+            command: npm run dist:linux
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: electron-helper/package-lock.json
 
       - name: Create .env from secret
         shell: bash
         env:
           DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
-        run: |
-          echo "DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID}" > .env
+        run: echo "DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID}" > .env
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
+      - run: npm ci
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build Windows installers
-        env:
-          DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
-        run: npm run dist:win
-
-      - name: Prepare Windows artifact folder
-        shell: bash
-        run: |
-          mkdir -p release/windows
-          cp dist/*-win-*.exe release/windows/ || true
-          cp README.md release/windows/README.md
-
-      - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: electron-helper-windows
-          path: electron-helper/release/windows/**
-
-  build-macos-arm64:
-    name: Build macOS arm64
-    runs-on: macos-latest
-
-    defaults:
-      run:
-        working-directory: electron-helper
-
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Create .env from secret
+      - name: Build
         shell: bash
         env:
-          DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
-        run: |
-          echo "DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID}" > .env
+          # Real signing when the certificate secrets exist; otherwise the
+          # afterPack hook ad-hoc signs so Apple Silicon can still launch it.
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: ${{ matrix.command }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build macOS arm64
-        env:
-          DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
-        run: |
-          npm run build:app
-          npx electron-builder --mac --arm64
-
-      - name: Prepare macOS arm64 artifact folder
-        run: |
-          mkdir -p release/macos-arm64
-          cp dist/*-mac-arm64.dmg release/macos-arm64/ 2>/dev/null || true
-          cp dist/*-mac-arm64.zip release/macos-arm64/ 2>/dev/null || true
-          cp README.md release/macos-arm64/README.md
-
-      - name: Upload macOS arm64 artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: electron-helper-macos-arm64
-          path: electron-helper/release/macos-arm64/**
-
-  build-macos-intel:
-    name: Build macOS Intel (x64)
-    runs-on: macos-latest
-
-    defaults:
-      run:
-        working-directory: electron-helper
-
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Create .env from secret
+      # The whole point of the macOS work: an unsigned arm64 bundle is what
+      # macOS reports as "damaged and can't be opened". Fail the build here
+      # rather than shipping another broken download.
+      - name: Verify macOS signature
+        if: startsWith(matrix.os, 'macos')
         shell: bash
-        env:
-          DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
         run: |
-          echo "DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID}" > .env
+          APP=$(find release/mac* -maxdepth 1 -name "*.app" -print -quit)
+          if [ -z "$APP" ]; then
+            echo "::error::No .app bundle produced"
+            exit 1
+          fi
+          echo "Verifying $APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign --display --verbose=2 "$APP" 2>&1 | grep -E "Signature|Identifier|TeamIdentifier" || true
+          echo "✅ Signature valid — this bundle will not be reported as damaged."
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/upload-artifact@v4
         with:
-          node-version: 20
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build macOS Intel
-        env:
-          DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
-        run: |
-          npm run build:app
-          npx electron-builder --mac --x64
-
-      - name: Prepare macOS Intel artifact folder
-        run: |
-          mkdir -p release/macos-intel
-          cp dist/*-mac-x64.dmg release/macos-intel/ 2>/dev/null || true
-          cp dist/*-mac-x64.zip release/macos-intel/ 2>/dev/null || true
-          cp README.md release/macos-intel/README.md
-
-      - name: Upload macOS Intel artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: electron-helper-macos-intel
-          path: electron-helper/release/macos-intel/**
+          name: electron-helper-${{ matrix.artifact }}
+          path: |
+            electron-helper/release/*.dmg
+            electron-helper/release/*.zip
+            electron-helper/release/*.exe
+            electron-helper/release/*.AppImage
+            electron-helper/release/*.deb
+          if-no-files-found: error

@@ -11,6 +11,15 @@ interface PresencePayload {
   album_tracks_count?: number
   is_single?: boolean
   track_image_url?: string
+  /**
+   * Discord asset name resolved by the web app from the admin-managed alias
+   * table. Wins over anything derived here — Discord rejects a great many real
+   * album titles as asset names (length, punctuation, explicit wording), so
+   * admins upload the art under a safe key and alias the real title to it.
+   */
+  asset_key?: string
+  /** Hover text override that travels with the alias. */
+  asset_text?: string
   deep_link?: string
   timestamp?: number
   position_ms?: number
@@ -152,7 +161,22 @@ function getTrackImageFallback(payload: PresencePayload): string {
   return FALLBACK_ASSET_KEY
 }
 
+/**
+ * Discord asset names are `[a-z0-9_-]`, max 32 chars. A key outside that shape
+ * makes Discord render no art at all, so treat it as absent and let the derived
+ * key take over.
+ */
+function validAssetKey(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  const trimmed = value.trim().toLowerCase()
+  if (!trimmed || trimmed.length > 32) return undefined
+  return /^[a-z0-9_-]+$/.test(trimmed) ? trimmed : undefined
+}
+
 function getTrackImageKey(payload: PresencePayload): string {
+  const aliased = validAssetKey(payload.asset_key)
+  if (aliased) return aliased
+
   const isSingle = isSingleTrack(payload)
 
   if (isSingle) {
@@ -255,7 +279,7 @@ export function createPresenceActivity(
         } else {
           details = 'Browsing'
           state = undefined
-          largeImageKey = artistAssetKey(artist_name)
+          largeImageKey = validAssetKey(merged.asset_key) || artistAssetKey(artist_name)
           largeImageText = cleanedArtist || APP_NAME
         }
         break
@@ -277,7 +301,9 @@ export function createPresenceActivity(
         } else {
           details = truncate(track_title || 'Untitled', 128)
           state = undefined
-          largeImageKey = getTrackImageKey(payload as PresencePayload)
+          // Resolve against `merged`, not the raw payload: URL-derived context
+          // carries the artist when the caller omitted it.
+          largeImageKey = getTrackImageKey(merged)
           largeImageText = cleanedArtist || APP_NAME
         }
         break
@@ -292,13 +318,17 @@ export function createPresenceActivity(
     const topName = APP_NAME
     const activityType = 2
 
+    // An alias may carry its own hover text (e.g. the real album title, which
+    // Discord will happily *display* even when it refuses it as an asset name).
+    const resolvedImageText = merged.asset_text?.trim() || largeImageText
+
     const presence: SetActivity = {
       name: topName,
       type: activityType,
       details: truncate(details, 128),
       state: state ? truncate(state, 128) : undefined,
       largeImageKey,
-      largeImageText: truncate(largeImageText, 128)
+      largeImageText: truncate(resolvedImageText, 128)
     }
 
     if (context === 'track') {

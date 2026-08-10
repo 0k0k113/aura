@@ -1,0 +1,12 @@
+node_modules/
+
+# electron-helper: TypeScript output (`tsc` → dist/) and electron-builder
+# output (`release/`) are both build artifacts. They were previously committed
+# and went stale — dist/ still pointed at the retired netlify domain long after
+# app/ had moved to unreleased.world. Never commit them again.
+electron-helper/dist/
+electron-helper/release/
+electron-helper/dist-builds/
+
+# Bundled at build time from the DISCORD_CLIENT_ID secret.
+electron-helper/.env

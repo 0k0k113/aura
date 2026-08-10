@@ -1,0 +1,203 @@
+name: Release Electron Helper
+
+# Publishes a GitHub Release with signed installers for every platform.
+#
+# Previously releases were assembled by hand from CI artifacts. That is how an
+# unsigned arm64 build reached users and produced macOS's
+# "…is damaged and can't be opened" error — nothing in the pipeline ever checked
+# that the bundle carried a valid signature. This workflow verifies the
+# signature before the artifact is allowed anywhere near a release.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v1.0.1). Created if it doesn't exist."
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    working-directory: electron-helper
+
+jobs:
+  verify:
+    name: Typecheck & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: electron-helper/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            os: macos-latest
+            artifact: macos-arm64
+            command: npm run dist:mac:arm64
+          - name: macOS Intel
+            os: macos-13
+            artifact: macos-intel
+            command: npm run dist:mac:x64
+          - name: Windows
+            os: windows-latest
+            artifact: windows
+            command: npm run dist:win
+          - name: Linux
+            os: ubuntu-latest
+            artifact: linux
+            command: npm run dist:linux
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: electron-helper/package-lock.json
+
+      - name: Create .env from secret
+        shell: bash
+        env:
+          DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
+        run: echo "DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID}" > .env
+
+      - run: npm ci
+
+      - name: Build
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: ${{ matrix.command }}
+
+      - name: Verify macOS signature
+        if: startsWith(matrix.os, 'macos')
+        shell: bash
+        run: |
+          APP=$(find release/mac* -maxdepth 1 -name "*.app" -print -quit)
+          if [ -z "$APP" ]; then
+            echo "::error::No .app bundle produced"
+            exit 1
+          fi
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          if codesign --display --verbose=2 "$APP" 2>&1 | grep -q "TeamIdentifier=not set"; then
+            echo "::warning::Ad-hoc signed only (no Developer ID). Launches fine on Apple Silicon; browser downloads still need one approval via System Settings → Privacy & Security. The curl installer avoids that entirely. Add CSC_LINK + APPLE_* secrets to notarize."
+          else
+            echo "✅ Developer ID signed."
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.artifact }}
+          path: |
+            electron-helper/release/*.dmg
+            electron-helper/release/*.zip
+            electron-helper/release/*.exe
+            electron-helper/release/*.AppImage
+            electron-helper/release/*.deb
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve tag
+        id: tag
+        working-directory: .
+        run: echo "name=${{ inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: release-*
+          merge-multiple: true
+
+      - name: List artifacts
+        working-directory: .
+        run: ls -la artifacts
+
+      - name: Publish
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.name }}
+        run: |
+          cat > notes.md <<'NOTES'
+          ## Install on macOS — one command, no security prompts
+
+          ```
+          curl -fsSL https://unreleased.world/install.sh | sh
+          ```
+
+          Paste that into Terminal. It picks the right build for your Mac,
+          verifies the app's signature, installs it and opens it.
+
+          Why this is the easy path: these builds are code-signed but not
+          notarized by Apple (notarization needs a paid Developer account).
+          Anything a **browser** downloads gets tagged with macOS's quarantine
+          flag, and Gatekeeper won't open a non-notarized app carrying that tag
+          without a trip through System Settings. `curl` doesn't set that tag.
+          The script is short and commented — read it at
+          https://unreleased.world/install.sh before running it.
+
+          ### Or download the app directly
+
+          - **Apple Silicon (M1–M4):** `Unreleased-Presence-mac-arm64.dmg`
+          - **Intel Mac:** `Unreleased-Presence-mac-x64.dmg`
+          - **Windows:** `Unreleased-Presence-win-x64.exe`
+
+          Drag it to Applications, double-click, then allow it in
+          **System Settings → Privacy & Security → "Open Anyway"**.
+          (On macOS 14 and earlier you can instead right-click → Open. Apple
+          removed that shortcut in macOS 15.)
+
+          ### "It says the app is damaged"
+
+          It isn't. That message means macOS found no valid signature, and it
+          came from older builds that shipped completely unsigned — which Apple
+          Silicon refuses to run. **This release is signed**, so downloading it
+          fixes the problem. If it somehow persists:
+
+          ```
+          xattr -dr com.apple.quarantine "/Applications/Unreleased Presence.app"
+          ```
+
+          ### Requirements
+
+          - macOS 11 (Big Sur) or newer, or Windows 10/11
+          - The Discord desktop app running on the same machine
+          NOTES
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" artifacts/* --clobber
+          else
+            gh release create "$TAG" artifacts/* \
+              --title "$TAG" \
+              --notes-file notes.md
+          fi
