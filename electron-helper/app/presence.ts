@@ -304,7 +304,11 @@ export function createPresenceActivity(
           // below. Discord reads that line from a real activity field, so the
           // artist has to travel in `state`; it also renders under the track
           // title in the expanded card, the way every music app shows it.
-          state = cleanedArtist
+          //
+          // Lowercased, always: it matches the wordmark, and it is the ONE
+          // field this applies to — the track title keeps its own casing, and
+          // so does "unreleased.world" in the header.
+          state = cleanedArtist?.toLowerCase()
           // Resolve against `merged`, not the raw payload: URL-derived context
           // carries the artist when the caller omitted it.
           largeImageKey = getTrackImageKey(merged)
