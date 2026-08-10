@@ -1,6 +1,21 @@
 import { Client } from '@xhayper/discord-rpc'
 import type { SetActivity } from '@xhayper/discord-rpc'
 
+/** Snapshot of the RPC link, surfaced in the tray and over `presence:ping`. */
+export interface RpcStatus {
+  /** Transport is connected to the local Discord client. */
+  connected: boolean
+  /** Discord told us who the user is — required before an activity can be set. */
+  hasUser: boolean
+  /** Activities successfully handed to Discord. */
+  activitiesSent: number
+  /** Activities dropped, with the reason. */
+  activitiesDropped: number
+  lastActivityAt: number | null
+  lastError: string | null
+  clientIdPresent: boolean
+}
+
 export class DiscordRPC {
   private client: Client
   private connected = false
@@ -11,19 +26,29 @@ export class DiscordRPC {
   private readonly THROTTLE_MS = 1000
   private readonly RECONNECT_DELAY = 5000
 
+  // Diagnostics. Presence failing used to be completely invisible: the only
+  // signal was a console.log nobody could see, in a window with no devtools.
+  private activitiesSent = 0
+  private activitiesDropped = 0
+  private lastActivityAt: number | null = null
+  private lastError: string | null = null
+  private readonly clientIdPresent: boolean
+
   constructor(clientId: string) {
+    this.clientIdPresent = Boolean(clientId)
     this.client = new Client({ clientId })
 
     this.client.on('ready', () => {
       console.log('[RPC] Connected to Discord')
       this.connected = true
+      this.lastError = null
       if (this.lastActivity) {
-        this.setActivity(this.lastActivity)
+        this.setActivity(this.lastActivity, true)
       }
     })
 
     this.client.on('disconnected', () => {
-      console.log('[RPC] Disconnected from Discord')
+      console.warn('[RPC] Disconnected from Discord — will retry')
       this.connected = false
       this.scheduleReconnect()
     })
@@ -33,8 +58,12 @@ export class DiscordRPC {
     try {
       await this.client.login()
       this.connected = true
-    } catch (error) {
-      console.warn('[RPC] Failed to connect:', error)
+      console.log(
+        `[RPC] Logged in. Discord user available: ${this.client.user ? 'yes' : 'NO'}`,
+      )
+    } catch (error: any) {
+      this.lastError = error?.message || String(error)
+      console.warn('[RPC] Failed to connect:', this.lastError)
       this.scheduleReconnect()
       throw error
     }
@@ -49,16 +78,62 @@ export class DiscordRPC {
       this.reconnectTimeout = null
       console.log('[RPC] Attempting to reconnect...')
       this.login().catch(err => {
-        console.warn('[RPC] Reconnect failed:', err)
+        console.warn('[RPC] Reconnect failed:', err?.message || err)
       })
     }, this.RECONNECT_DELAY)
+  }
+
+  /**
+   * Hand an activity to Discord.
+   *
+   * `client.user` is populated from Discord's READY payload and is what
+   * actually carries `setActivity`. The previous code wrote
+   * `this.client.user?.setActivity(...)`, so whenever Discord had not supplied
+   * a user the call became a silent no-op — presence would appear completely
+   * dead with nothing logged anywhere. Missing state is now reported instead
+   * of swallowed.
+   */
+  private dispatch(presence: SetActivity): void {
+    const user = this.client.user
+
+    if (!user) {
+      this.activitiesDropped++
+      this.lastError =
+        'Discord connected but never identified the user, so activities cannot be set. ' +
+        'Restart Discord, then restart Unreleased Presence.'
+      console.error(`[RPC] ${this.lastError}`)
+      // Reconnecting is the only thing that can recover this.
+      this.connected = false
+      this.scheduleReconnect()
+      return
+    }
+
+    this.lastUpdateTime = Date.now()
+
+    user
+      .setActivity(presence)
+      .then(() => {
+        this.activitiesSent++
+        this.lastActivityAt = Date.now()
+        this.lastError = null
+      })
+      .catch((error: any) => {
+        this.activitiesDropped++
+        this.lastError = error?.message || String(error)
+        console.warn('[RPC] Failed to set activity:', this.lastError)
+        if (/connection|closed|ended/i.test(this.lastError ?? '')) {
+          this.connected = false
+          this.scheduleReconnect()
+        }
+      })
   }
 
   setActivity(presence: SetActivity, bypassThrottle: boolean = false): void {
     this.lastActivity = presence
 
     if (!this.connected) {
-      console.warn('[RPC] Not connected, activity will be set when connected')
+      // Not an error: it is replayed from the `ready` handler once connected.
+      this.activitiesDropped++
       return
     }
 
@@ -66,20 +141,11 @@ export class DiscordRPC {
     const timeSinceLastUpdate = now - this.lastUpdateTime
 
     if (bypassThrottle) {
-      console.log('[RPC] Bypassing throttle for immediate update')
       if (this.updateThrottle) {
         clearTimeout(this.updateThrottle)
         this.updateThrottle = null
       }
-      this.lastUpdateTime = now
-
-      this.client.user?.setActivity(presence).catch(error => {
-        console.warn('[RPC] Failed to set activity:', error)
-        if (error.message?.includes('connection')) {
-          this.connected = false
-          this.scheduleReconnect()
-        }
-      })
+      this.dispatch(presence)
       return
     }
 
@@ -101,15 +167,7 @@ export class DiscordRPC {
       this.updateThrottle = null
     }
 
-    this.lastUpdateTime = now
-
-    this.client.user?.setActivity(presence).catch(error => {
-      console.warn('[RPC] Failed to set activity:', error)
-      if (error.message?.includes('connection')) {
-        this.connected = false
-        this.scheduleReconnect()
-      }
-    })
+    this.dispatch(presence)
   }
 
   clearActivity(): void {
@@ -119,8 +177,8 @@ export class DiscordRPC {
       return
     }
 
-    this.client.user?.clearActivity().catch(error => {
-      console.warn('[RPC] Failed to clear activity:', error)
+    this.client.user?.clearActivity().catch((error: any) => {
+      console.warn('[RPC] Failed to clear activity:', error?.message || error)
     })
   }
 
@@ -129,7 +187,19 @@ export class DiscordRPC {
   }
 
   isReady(): boolean {
-    return this.connected
+    return this.connected && Boolean(this.client.user)
+  }
+
+  getStatus(): RpcStatus {
+    return {
+      connected: this.connected,
+      hasUser: Boolean(this.client.user),
+      activitiesSent: this.activitiesSent,
+      activitiesDropped: this.activitiesDropped,
+      lastActivityAt: this.lastActivityAt,
+      lastError: this.lastError,
+      clientIdPresent: this.clientIdPresent,
+    }
   }
 
   destroy(): void {
@@ -146,8 +216,8 @@ export class DiscordRPC {
     this.clearActivity()
 
     if (this.connected) {
-      this.client.destroy().catch(error => {
-        console.warn('[RPC] Error destroying client:', error)
+      this.client.destroy().catch((error: any) => {
+        console.warn('[RPC] Error destroying client:', error?.message || error)
       })
     }
 
