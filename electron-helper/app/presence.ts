@@ -308,14 +308,16 @@ export function createPresenceActivity(
           // Resolve against `merged`, not the raw payload: URL-derived context
           // carries the artist when the caller omitted it.
           largeImageKey = getTrackImageKey(merged)
-          // NOT the artist. This field used to carry it, back when it was the
-          // only place the artist appeared; now that `state` shows the artist
-          // as its own row, repeating it here rendered the name TWICE, stacked.
-          // Label the art with what the art actually is — the album — and skip
-          // it for singles, whose album_name is just the track title again
-          // (which `details` already shows). An alias's `asset_text` still
-          // overrides this, so admin-set hover text is unaffected.
-          largeImageText = (!isSingleTrack(merged) && merged.album_name?.trim()) || APP_NAME
+          // Nothing. Discord has exactly ONE cover-art text field (`large_text`)
+          // and its client paints it as a line in the now-playing card, not only
+          // as the hover tooltip — which is how the album name ended up in the
+          // embed, and how this field previously showed the artist a second
+          // time. A playing track therefore carries no image text at all.
+          // Aliases still supply the ART (`asset_key`); only their display text
+          // is withheld here, since it is the album title too. See the
+          // resolvedImageText note below, which keeps `asset_text` from putting
+          // it straight back.
+          largeImageText = undefined
         }
         break
 
@@ -331,7 +333,12 @@ export function createPresenceActivity(
 
     // An alias may carry its own hover text (e.g. the real album title, which
     // Discord will happily *display* even when it refuses it as an asset name).
-    const resolvedImageText = merged.asset_text?.trim() || largeImageText
+    // NOT while a track is playing: every alias in use is an album whose
+    // display text is the album title, and this field is drawn INSIDE the
+    // now-playing card, so honouring it there would reprint the album name the
+    // track case just removed. Browsing an artist or a profile still uses it.
+    const resolvedImageText =
+      context === 'track' ? largeImageText : merged.asset_text?.trim() || largeImageText
 
     const presence: SetActivity = {
       name: topName,
