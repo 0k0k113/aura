@@ -21,6 +21,8 @@ export class DiscordRPC {
   private connected = false
   private reconnectTimeout: NodeJS.Timeout | null = null
   private lastActivity: SetActivity | null = null
+  /** Nothing has been shown yet, so the first clear has nothing to undo. */
+  private activityCleared = true
   private updateThrottle: NodeJS.Timeout | null = null
   private lastUpdateTime = 0
   private readonly THROTTLE_MS = 1000
@@ -130,6 +132,7 @@ export class DiscordRPC {
 
   setActivity(presence: SetActivity, bypassThrottle: boolean = false): void {
     this.lastActivity = presence
+    this.activityCleared = false
 
     if (!this.connected) {
       // Not an error: it is replayed from the `ready` handler once connected.
@@ -170,16 +173,46 @@ export class DiscordRPC {
     this.dispatch(presence)
   }
 
+  /**
+   * Take the card down.
+   *
+   * Two things make this more than a passthrough:
+   *
+   *   • A pending THROTTLED set must be cancelled. setActivity defers an update
+   *     that arrives inside the throttle window, so pausing within a second of
+   *     the last update would clear the card and then let the deferred timer
+   *     re-post it — the card blinking back after a pause.
+   *
+   *   • Repeat clears are dropped. Browsing emits a payload per navigation and
+   *     none of them show anything now, so without this every click would spend
+   *     one of Discord's rate-limited RPC calls saying "still nothing".
+   */
   clearActivity(): void {
     this.lastActivity = null
 
+    if (this.updateThrottle) {
+      clearTimeout(this.updateThrottle)
+      this.updateThrottle = null
+    }
+
+    if (this.activityCleared) return
+    this.activityCleared = true
+
     if (!this.connected) {
+      // Discord drops a disconnected client's activity on its own, and the
+      // `ready` handler replays only a non-null lastActivity — so there is
+      // nothing left to take down.
       return
     }
 
     this.client.user?.clearActivity().catch((error: any) => {
       console.warn('[RPC] Failed to clear activity:', error?.message || error)
     })
+  }
+
+  /** True when Discord is currently showing nothing for us. */
+  isCleared(): boolean {
+    return this.activityCleared
   }
 
   isConnected(): boolean {

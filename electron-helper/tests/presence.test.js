@@ -1,6 +1,8 @@
 // tests/presence.test.js
 //
-// Covers Discord activity construction, with emphasis on art selection:
+// Covers Discord activity construction:
+//   • THE GATE — a card exists only while a track is playing; everything else
+//     builds nothing at all, which the caller turns into clearActivity()
 //   • alias-resolved asset keys win over derived ones
 //   • single vs album classification (broken while main.ts's zod schema was
 //     silently stripping is_single / album_type / album_tracks_count)
@@ -37,28 +39,6 @@ test('an alias-resolved asset_key overrides the derived key', () => {
     asset_key: 'album_wlr_2020',
   }))
   assert.equal(activity.largeImageKey, 'album_wlr_2020')
-})
-
-test('asset_key wins for artist browsing too', () => {
-  const activity = createPresenceActivity(HOME, {
-    context: 'artist',
-    artist_name: 'Playboi Carti',
-    asset_key: 'artist_carti_alt',
-  })
-  assert.equal(activity.largeImageKey, 'artist_carti_alt')
-})
-
-test('asset_text overrides the hover text when browsing (not mid-track)', () => {
-  // Every alias in use is an album whose display text IS the album title, and
-  // Discord paints large_text inside the now-playing card — so a PLAYING track
-  // withholds it (see the no-album-name test below). Browsing still uses it.
-  const activity = createPresenceActivity(HOME, {
-    context: 'artist',
-    artist_name: 'Playboi Carti',
-    asset_key: 'album_safe_key',
-    asset_text: 'The Real Album Title',
-  })
-  assert.equal(activity.largeImageText, 'The Real Album Title')
 })
 
 test('an asset_key Discord would reject is ignored, not forwarded', () => {
@@ -173,24 +153,10 @@ test('a playing track carries start and end timestamps', () => {
   assert.ok(activity.endTimestamp > activity.startTimestamp)
 })
 
-test('a paused track carries no timestamps', () => {
-  const activity = createPresenceActivity(HOME, {
-    context: 'track',
-    track_title: 'Some Song',
-    artist_name: 'Playboi Carti',
-    is_playing: false,
-    position_ms: 30_000,
-    duration_ms: 180_000,
-  })
-  assert.equal(activity.startTimestamp, undefined)
+test('a playing track with no duration still gets a start timestamp', () => {
+  const activity = createPresenceActivity(HOME, playing({ duration_ms: undefined }))
+  assert.ok(activity.startTimestamp > 0)
   assert.equal(activity.endTimestamp, undefined)
-})
-
-test('browsing uses the logo and no timer', () => {
-  const activity = createPresenceActivity(HOME, { context: 'browsing' })
-  assert.equal(activity.largeImageKey, FALLBACK)
-  assert.equal(activity.details, 'Browsing')
-  assert.equal(activity.startTimestamp, undefined)
 })
 
 test('activity is always reported as Listening to unreleased.world', () => {
@@ -297,19 +263,93 @@ test('a track with no artist keeps the old member-list text rather than going bl
   assert.equal(activity.statusDisplayType, undefined)
 })
 
-test('pausing leaves the member list exactly as it was before this change', () => {
-  // Pausing already reclassified the presence to `artist` ("Browsing" + the
-  // artist's art) long before the member-list line moved. That path is
-  // deliberately untouched here — the artist name replaces "unreleased.world"
-  // while a track is PLAYING, which is the only case that was asked for.
-  const activity = createPresenceActivity(HOME, playing({ is_playing: false }))
-  assert.equal(activity.statusDisplayType, undefined)
-  assert.equal(activity.details, 'Browsing')
+// ---------------------------------------------------------------------------
+// The gate: a card exists ONLY while a track is playing.
+//
+// `null` is the "show nothing" signal. main.ts answers it with
+// clearActivity() — see the contract note in presence.ts. Every case below
+// used to render a "Browsing" card instead.
+// ---------------------------------------------------------------------------
+
+test('PAUSING shows nothing at all', () => {
+  assert.equal(createPresenceActivity(HOME, playing({ is_playing: false })), null)
 })
 
-test('browsing still reads unreleased.world in the member list', () => {
-  for (const payload of [{ context: 'browsing' }, { context: 'profile' }]) {
-    const activity = createPresenceActivity(HOME, payload)
-    assert.equal(activity.statusDisplayType, undefined, `${payload.context} changed`)
+test('pausing shows nothing however much metadata the payload carries', () => {
+  const cases = [
+    { album_name: 'Die Lit', is_single: false },
+    { album_name: 'Whole Lotta Red', asset_key: 'album_wlr', asset_text: 'Whole Lotta Red' },
+    { position_ms: 0 },
+    { position_ms: 179_000, duration_ms: 180_000 }, // a track running out
+    {},
+  ]
+  for (const extra of cases) {
+    const activity = createPresenceActivity(HOME, playing({ ...extra, is_playing: false }))
+    assert.equal(activity, null, `paused card rendered for ${JSON.stringify(extra)}`)
   }
+})
+
+test('browsing, artist pages and profiles all show nothing', () => {
+  const payloads = [
+    { context: 'browsing' },
+    { context: 'browsing', details: 'Browsing' },
+    { context: 'artist', artist_name: 'Playboi Carti' },
+    { context: 'artist', artist_name: 'Playboi Carti', asset_key: 'artist_carti_alt' },
+    { context: 'profile' },
+    { context: 'profile', deep_link: 'https://unreleased.world/profiles/someone' },
+  ]
+  for (const payload of payloads) {
+    assert.equal(
+      createPresenceActivity(HOME, payload),
+      null,
+      `${payload.context} still rendered a card`,
+    )
+  }
+})
+
+test('an artist-page URL alone shows nothing', () => {
+  // The URL used to supply a whole "Browsing" card by itself, with no payload.
+  assert.equal(createPresenceActivity('https://unreleased.world/artist/playboi-carti'), null)
+  assert.equal(createPresenceActivity(HOME), null)
+  assert.equal(createPresenceActivity(HOME, {}), null)
+})
+
+test('a payload that never says is_playing shows nothing', () => {
+  // `!== true`, not `=== false`: browsing payloads omit the field entirely.
+  const activity = createPresenceActivity(HOME, {
+    context: 'track',
+    track_title: 'Some Song',
+    artist_name: 'Playboi Carti',
+  })
+  assert.equal(activity, null)
+})
+
+test('a "playing" payload with no metadata shows nothing rather than an empty card', () => {
+  assert.equal(createPresenceActivity(HOME, { context: 'track', is_playing: true }), null)
+  // Even on an artist page, where the URL could have supplied a name.
+  assert.equal(
+    createPresenceActivity('https://unreleased.world/artist/playboi-carti', {
+      context: 'track',
+      is_playing: true,
+    }),
+    null,
+  )
+})
+
+test('the card comes back exactly as before when playback resumes', () => {
+  const paused = createPresenceActivity(HOME, playing({ is_playing: false }))
+  const resumed = createPresenceActivity(HOME, playing())
+
+  assert.equal(paused, null)
+  assert.equal(resumed.details, 'Some Song')
+  assert.equal(resumed.state, 'playboi carti')
+  assert.equal(resumed.statusDisplayType, 1)
+  assert.ok(resumed.startTimestamp > 0)
+})
+
+test('browsing mid-song does not rename the artist to the page you are on', () => {
+  // The card must describe what is PLAYING, not what is on screen: the display
+  // name comes from the payload, while only the art may fall back to the URL.
+  const activity = createPresenceActivity('https://unreleased.world/artist/ken-carson', playing())
+  assert.equal(activity.state, 'playboi carti')
 })
