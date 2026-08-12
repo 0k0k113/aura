@@ -31,7 +31,6 @@ interface PresencePayload {
 }
 
 const FALLBACK_ASSET_KEY = 'unreleasd_logo'
-const BASE_URL = 'https://unreleased.world'
 const APP_NAME = 'unreleased.world'
 
 // Transliteration map for special characters to readable ASCII
@@ -228,6 +227,19 @@ function extractContextFromUrl(url: string): PresencePayload {
   }
 }
 
+/**
+ * Build the Discord activity for a presence payload — or nothing at all.
+ *
+ * There is exactly one card: a track that is PLAYING. Everything else returns
+ * `null` — paused, browsing, an artist page, a profile, the moment a track
+ * ends, a payload with no metadata. `null` is not an error here; it means
+ * "show nothing", and the caller answers it by CLEARING the activity rather
+ * than leaving the previous card on screen.
+ *
+ * That last part is the whole contract: a builder that returns null while the
+ * caller only ever calls setActivity would freeze the last card in place
+ * forever, which looks exactly like a paused track that never went away.
+ */
 export function createPresenceActivity(
   currentUrl: string,
   payload?: PresencePayload
@@ -236,160 +248,76 @@ export function createPresenceActivity(
     const urlContext = extractContextFromUrl(currentUrl)
     const merged: PresencePayload = { ...urlContext, ...payload }
 
-    let context: 'browsing' | 'artist' | 'track' | 'profile'
-    if (payload?.context && payload.context !== 'track') {
-      context = payload.context
-    } else {
-      const hasTrackInfo = merged.track_title || merged.artist_name
-      const isPlaying = merged.is_playing === true
-      if (hasTrackInfo && !isPlaying && merged.artist_name) {
-        context = 'artist'
-      } else if (hasTrackInfo && isPlaying) {
-        context = 'track'
-      } else {
-        context = merged.context || 'browsing'
-      }
-    }
+    // ── The gate ────────────────────────────────────────────────────────────
+    // Not playing → nothing. `!== true` rather than `=== false` on purpose:
+    // a browsing or artist payload carries no `is_playing` at all, and those
+    // must show nothing too.
+    if (merged.is_playing !== true) return null
 
-    const { track_title, deep_link, position_ms, duration_ms, is_playing, trace_id } = merged
-    const artist_name = context === 'track' && payload?.artist_name
-      ? payload.artist_name
-      : (context === 'artist' ? merged.artist_name : undefined)
+    // The display artist comes from the PAYLOAD only. `merged` would fall back
+    // to the artist parsed out of the current URL, which is the page you are
+    // looking at rather than the track you are hearing — those differ the
+    // moment you browse elsewhere mid-song.
+    const artist_name = payload?.artist_name
+    const { track_title, position_ms, duration_ms, trace_id } = merged
 
-    let details: string | undefined
-    let state: string | undefined
-    let largeImageKey: string
-    let largeImageText: string | undefined
+    // A "playing" payload with no metadata would render an empty card.
+    if (!track_title && !artist_name) return null
+
     const cleanedArtist = cleanArtistName(artist_name)
 
-    switch (context) {
-      case 'browsing':
-        details = 'Browsing'
-        state = APP_NAME
-        largeImageKey = FALLBACK_ASSET_KEY
-        largeImageText = undefined // avoid duplicate "unreleased.world"
-        break
-
-      case 'artist':
-        if (!artist_name) {
-          details = 'Browsing'
-          state = undefined
-          largeImageKey = FALLBACK_ASSET_KEY
-          largeImageText = undefined
-        } else {
-          details = 'Browsing'
-          state = undefined
-          largeImageKey = validAssetKey(merged.asset_key) || artistAssetKey(artist_name)
-          largeImageText = cleanedArtist || APP_NAME
-        }
-        break
-
-      case 'profile':
-        details = 'Profile'
-        state = undefined
-        largeImageKey = FALLBACK_ASSET_KEY
-        largeImageText = APP_NAME
-        break
-
-      case 'track':
-        if (!track_title && !artist_name) {
-          console.warn('[Presence] Track context but no metadata - this indicates a bug')
-          details = 'Browsing'
-          state = undefined
-          largeImageKey = FALLBACK_ASSET_KEY
-          largeImageText = APP_NAME
-        } else {
-          details = truncate(track_title || 'Untitled', 128)
-          // The artist doubles as the MEMBER LIST line — see statusDisplayType
-          // below. Discord reads that line from a real activity field, so the
-          // artist has to travel in `state`; it also renders under the track
-          // title in the expanded card, the way every music app shows it.
-          //
-          // Lowercased, always: it matches the wordmark, and it is the ONE
-          // field this applies to — the track title keeps its own casing, and
-          // so does "unreleased.world" in the header.
-          state = cleanedArtist?.toLowerCase()
-          // Resolve against `merged`, not the raw payload: URL-derived context
-          // carries the artist when the caller omitted it.
-          largeImageKey = getTrackImageKey(merged)
-          // Nothing. Discord has exactly ONE cover-art text field (`large_text`)
-          // and its client paints it as a line in the now-playing card, not only
-          // as the hover tooltip — which is how the album name ended up in the
-          // embed, and how this field previously showed the artist a second
-          // time. A playing track therefore carries no image text at all.
-          // Aliases still supply the ART (`asset_key`); only their display text
-          // is withheld here, since it is the album title too. See the
-          // resolvedImageText note below, which keeps `asset_text` from putting
-          // it straight back.
-          largeImageText = undefined
-        }
-        break
-
-      default:
-        return null
-    }
-
+    const details = truncate(track_title || 'Untitled', 128)
     if (!details || details.trim().length === 0) return null
 
-    // Always show "Listening to unreleased.world"
-    const topName = APP_NAME
-    const activityType = 2
-
-    // An alias may carry its own hover text (e.g. the real album title, which
-    // Discord will happily *display* even when it refuses it as an asset name).
-    // NOT while a track is playing: every alias in use is an album whose
-    // display text is the album title, and this field is drawn INSIDE the
-    // now-playing card, so honouring it there would reprint the album name the
-    // track case just removed. Browsing an artist or a profile still uses it.
-    const resolvedImageText =
-      context === 'track' ? largeImageText : merged.asset_text?.trim() || largeImageText
-
     const presence: SetActivity = {
-      name: topName,
-      type: activityType,
-      details: truncate(details, 128),
-      state: state ? truncate(state, 128) : undefined,
-      largeImageKey,
-      largeImageText: truncate(resolvedImageText, 128)
+      // The card header stays "Listening to unreleased.world".
+      name: APP_NAME,
+      type: 2,
+      details,
+      // The artist doubles as the MEMBER LIST line — see statusDisplayType
+      // below. Discord reads that line from a real activity field, so the
+      // artist has to travel in `state`; it also renders under the track title
+      // in the expanded card, the way every music app shows it.
+      //
+      // Lowercased, always: it matches the wordmark, and it is the ONE field
+      // this applies to — the track title keeps its own casing, and so does
+      // "unreleased.world" in the header.
+      state: truncate(cleanedArtist?.toLowerCase(), 128),
+      // Resolved against `merged`, not the raw payload: URL-derived context
+      // carries the artist when the caller omitted it, and the ART is allowed
+      // to fall back that way even though the printed name is not.
+      largeImageKey: getTrackImageKey(merged),
+      // Nothing. Discord has exactly ONE cover-art text field (`large_text`)
+      // and its client paints it as a line in the now-playing card, not only
+      // as the hover tooltip — which is how the album name ended up in the
+      // embed, and how this field previously showed the artist a second time.
+      // Aliases still supply the ART via `asset_key`; only their display text
+      // is withheld, since it is the album title too.
+      largeImageText: undefined,
+      // No buttons on the now-playing card.
+      buttons: undefined,
     }
 
     // Member list, next to the 🎵 — the one line Discord shows when the card
     // is collapsed. It defaults to the activity NAME, which made everyone
     // playing anything read "unreleased.world"; pointing it at STATE shows the
-    // artist instead, the way Spotify shows who you're listening to. Only
-    // while a track is playing, and only when there IS an artist: Discord
-    // falls back to the name when the chosen field is empty, so a track with
-    // no artist keeps today's behaviour rather than rendering blank.
-    // The expanded card is untouched — its header still reads
-    // "Listening to unreleased.world" (that comes from `name`).
-    if (context === 'track' && presence.state) {
+    // artist instead, the way Spotify shows who you're listening to. Only when
+    // there IS an artist: Discord falls back to the name when the chosen field
+    // is empty, so a track with no artist keeps the old behaviour rather than
+    // rendering blank.
+    if (presence.state) {
       presence.statusDisplayType = 1 // StatusDisplayType.STATE
     }
 
-    if (context === 'track') {
-      presence.buttons = undefined
-    } else if (context === 'artist') {
-      presence.buttons = undefined
-    } else if (context === 'profile') {
-      if (deep_link && (deep_link.startsWith('http://') || deep_link.startsWith('https://'))) {
-        presence.buttons = [{ label: 'View profile', url: deep_link }]
-      }
-    } else {
-      presence.buttons = [{ label: 'unreleased.world', url: BASE_URL }]
-    }
-
-    if (context === 'track' && is_playing === true && position_ms !== undefined && position_ms >= 0) {
-      const nowMs = Date.now()
-      const startTimestampMs = nowMs - position_ms
+    // The elapsed/remaining timer. Anchored to `position_ms` so it stays
+    // correct across seeks; a track only ever reaches here while playing.
+    if (position_ms !== undefined && position_ms >= 0) {
+      const startTimestampMs = Date.now() - position_ms
       ;(presence as any).startTimestamp = Math.floor(startTimestampMs / 1000)
 
       if (duration_ms !== undefined && duration_ms > 0) {
-        const endTimestampMs = startTimestampMs + duration_ms
-        ;(presence as any).endTimestamp = Math.floor(endTimestampMs / 1000)
+        ;(presence as any).endTimestamp = Math.floor((startTimestampMs + duration_ms) / 1000)
       }
-    } else {
-      delete (presence as any).startTimestamp
-      delete (presence as any).endTimestamp
     }
 
     logActivity('SetActivity', {

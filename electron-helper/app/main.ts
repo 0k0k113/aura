@@ -261,9 +261,20 @@ function setupIPC(): void {
           largeImageText: activity.largeImageText,
           hasTimestamp: !!activity.startTimestamp
         })
+      } else {
+        debugLog(`[IPC:${traceId}] Nothing to show — clearing presence`, {
+          context: validated.data.context,
+          is_playing: validated.data.is_playing,
+        })
       }
 
-      if (activity) {
+      // Bookkeeping runs for EVERY payload, including the ones that show
+      // nothing. It used to sit inside `if (activity)`, which was harmless
+      // while a pause still produced a card — now a pause produces none, and
+      // skipping the update would leave `lastIsPlaying` stuck on `true`, so
+      // pressing play again would not read as a play-state change and the card
+      // would come back throttled instead of instantly.
+      {
         let bypassThrottle = false
 
         const currentTrackId = validated.data.track_id || `${validated.data.track_title}_${validated.data.artist_name}`
@@ -363,7 +374,14 @@ function setupIPC(): void {
           lastTrackId = undefined
         }
 
-        rpc.setActivity(activity, bypassThrottle)
+        if (activity) {
+          rpc.setActivity(activity, bypassThrottle)
+        } else {
+          // The other half of the contract in presence.ts: a null activity
+          // means "show nothing", so the previous card has to come DOWN. Doing
+          // nothing here is what would leave a paused track frozen on screen.
+          rpc.clearActivity()
+        }
       }
     } catch (error) {
       console.error('[IPC] Error handling presence update:', error)
