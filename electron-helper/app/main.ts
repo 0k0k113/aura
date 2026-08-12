@@ -22,6 +22,7 @@ loadEnvironment()
 
 import { app, BrowserWindow, ipcMain, shell, Notification } from 'electron'
 import { DiscordRPC } from './rpc'
+import { collectResourceMetrics } from './metrics'
 import { createPresenceActivity } from './presence'
 import { createTray } from './tray'
 import { buildAllowedOrigins, isOriginAllowed, normalizeOrigin, ORIGINS_ARGV_PREFIX } from './origins'
@@ -405,6 +406,7 @@ function setupIPC(): void {
         ? rpc.getStatus()
         : { connected: false, reason: 'RPC not initialized — DISCORD_CLIENT_ID missing from the build' },
       bridge: { ...diagnostics },
+      resources: collectResourceMetrics(),
       appVersion: app.getVersion(),
     }
   })

@@ -3,6 +3,7 @@ import { Tray, Menu, BrowserWindow, nativeImage, Notification, clipboard } from 
 import * as path from 'path'
 import * as fs from 'fs'
 import { DiscordRPC } from './rpc'
+import { collectResourceMetrics } from './metrics'
 
 function resolveFirstExisting(paths: string[]): string | null {
   for (const p of paths) {
@@ -98,13 +99,21 @@ export function createTray(
 
   // Presence failing used to be entirely invisible — no window, no devtools,
   // no indicator. The status line below is the one place a user can look.
+  //
+  // It deliberately describes a STATE and nothing that ticks. It used to end
+  // with `(${activitiesSent} updates sent)`, and that counter is why the tray
+  // rebuilt its entire native menu every five seconds for an entire listening
+  // session: the label changed on essentially every refresh, so the "has
+  // anything changed" question could never be answered with "no". The exact
+  // count is still available under "Copy diagnostics", where reading it does
+  // not cost a menu rebuild.
   const describeStatus = (): string => {
     if (!rpc) return 'Discord: unavailable (build is missing DISCORD_CLIENT_ID)'
     const status = rpc.getStatus()
     if (!status.connected) return 'Discord: not connected — is Discord running?'
     if (!status.hasUser) return 'Discord: connected, but not identified — restart Discord'
     if (status.activitiesSent === 0) return 'Discord: connected — waiting for the site to send'
-    return `Discord: active (${status.activitiesSent} updates sent)`
+    return 'Discord: active'
   }
 
   const buildMenu = () => Menu.buildFromTemplate([
@@ -117,6 +126,9 @@ export function createTray(
           appVersion: require('electron').app.getVersion(),
           url: window?.webContents?.getURL() ?? null,
           discord: rpc ? rpc.getStatus() : { connected: false, reason: 'RPC not initialized' },
+          // CPU and memory per process, with uptime. A slowdown report is
+          // otherwise unfalsifiable once the app has been quit.
+          resources: collectResourceMetrics(),
         }
         clipboard.writeText(JSON.stringify(report, null, 2))
         new Notification({
@@ -206,17 +218,34 @@ export function createTray(
     { label: 'Quit', role: 'quit' }
   ])
 
+  let lastStatus = describeStatus()
   tray.setContextMenu(buildMenu())
+  tray.setToolTip(`Unreleased Presence — ${lastStatus}`)
 
-  // Rebuild so the status line reflects reality rather than start-up state.
+  // Keep the status line honest — but ONLY redraw when it actually changed.
+  //
+  // This used to rebuild unconditionally every five seconds. Menu.buildFromTemplate
+  // constructs a fresh native menu (on macOS an NSMenu and one NSMenuItem per
+  // entry) and setContextMenu hands it to the OS, so a 40-minute listening
+  // session spent ~480 of them — continuously, in the main process, for a menu
+  // nobody had open. Steady native allocation like that shows up as the whole
+  // machine getting slower the longer the app runs, and as the machine feeling
+  // instantly better the moment it quits.
+  //
+  // The status is a handful of states that change perhaps a few times a
+  // session, so the comparison below turns those ~480 rebuilds into roughly
+  // the number of times something genuinely happened.
   const statusTimer = setInterval(() => {
     if (tray.isDestroyed()) {
       clearInterval(statusTimer)
       return
     }
     try {
+      const status = describeStatus()
+      if (status === lastStatus) return
+      lastStatus = status
       tray.setContextMenu(buildMenu())
-      tray.setToolTip(`Unreleased Presence — ${describeStatus()}`)
+      tray.setToolTip(`Unreleased Presence — ${status}`)
     } catch {
       clearInterval(statusTimer)
     }
