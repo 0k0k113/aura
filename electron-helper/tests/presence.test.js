@@ -220,64 +220,51 @@ test('the artist appears exactly ONCE — no stacked duplicate row', () => {
   }
 })
 
-test('the album is NEVER in large_text — that is what draws the unwanted line', () => {
-  // Discord documents large_text as the large image's hover tooltip, and both
-  // the official and reverse-engineered docs say so. This client disagrees: it
-  // ALSO paints large_text as a line between the track title and the artist.
-  // Whatever it is called, nothing may travel in it.
+test('a playing track shows NO album name anywhere — no line, no tooltip, no badge', () => {
+  // Settled after trying every field Discord offers:
+  //
+  //   • large_text is documented as the large image's hover tooltip, but this
+  //     client ALSO paints it as a line between the title and the artist, so
+  //     hover and line arrive together.
+  //   • small_text really is hover-only, but it needs a small image to hover,
+  //     and that badge sits ON the corner of the artwork rather than being the
+  //     artwork — hovering the cover itself still showed nothing.
+  //
+  // There is no third image-text field, so the album name is simply not shown.
+  // It still selects the ART.
   const cases = [
-    { album_name: 'Die Lit', is_single: false },
-    { album_name: 'Whole Lotta Red', is_single: false, asset_key: 'album_wlr', asset_text: 'Whole Lotta Red' },
-    { album_name: 'Forever, ILY', is_single: false, asset_text: 'Forever, ILY' },
-    {},
-  ]
-  for (const extra of cases) {
-    const activity = createPresenceActivity(HOME, playing(extra))
-    assert.equal(activity.largeImageText, undefined, `large_text set for ${JSON.stringify(extra)}`)
-  }
-})
-
-test('the album rides on small_text instead, so it hovers without a line', () => {
-  // small_text is a separate field with its own hover target (the small image)
-  // and has never been part of any card line layout.
-  const cases = [
-    [{ album_name: 'Die Lit', is_single: false }, 'Die Lit', 'album_die_lit'],
+    [{ album_name: 'Die Lit', is_single: false }, 'album_die_lit'],
     [
       { album_name: 'Whole Lotta Red', is_single: false, asset_key: 'album_wlr', asset_text: 'Whole Lotta Red' },
-      'Whole Lotta Red',
       'album_wlr',
     ],
-    // An alias's display text is the real title Discord refused as a key.
+    // A real alias, whose display text IS the album title — the shape that
+    // would otherwise smuggle the album back in through asset_text.
+    [{ album_name: 'Forever, ILY', is_single: false, asset_text: 'Forever, ILY' }, 'album_forever_ily'],
     [
       { album_name: 'if looks could kill (directors cut)', is_single: false, asset_key: 'album_ilckd', asset_text: 'If Looks Could Kill (Directors Cut)' },
-      'If Looks Could Kill (Directors Cut)',
       'album_ilckd',
     ],
   ]
-  for (const [extra, expectedHover, expectedKey] of cases) {
+  for (const [extra, expectedKey] of cases) {
     const activity = createPresenceActivity(HOME, playing(extra))
-    assert.equal(activity.smallImageText, expectedHover, `hover wrong for ${JSON.stringify(extra)}`)
-    // The badge has to exist or there is nothing to hover.
-    assert.equal(activity.smallImageKey, FALLBACK)
-    // The large image is still the album art.
+    const label = JSON.stringify(extra)
+    // Every field Discord could render the album from.
+    assert.equal(activity.largeImageText, undefined, `large_text set for ${label}`)
+    assert.equal(activity.smallImageText, undefined, `small_text set for ${label}`)
+    assert.equal(activity.smallImageKey, undefined, `badge set for ${label}`)
+    assert.notEqual(activity.details, extra.album_name, `album in details for ${label}`)
+    assert.notEqual(activity.state, extra.album_name, `album in state for ${label}`)
+    // The album still picks the artwork.
     assert.equal(activity.largeImageKey, expectedKey)
-    // And the album is still absent from every printed line.
-    assert.ok(![activity.details, activity.state].includes(extra.album_name))
   }
 })
 
-test('a single gets no badge and no hover text', () => {
-  // Its "album" is the track title, already printed directly above.
-  for (const extra of [
-    { album_name: 'Some Song', is_single: true },
-    { album_name: 'Some Song' },
-    { album_name: 'Whatever', album_type: 'Single' },
-    { album_name: 'Whatever', album_tracks_count: 1 },
-    {},
-  ]) {
+test('no small image at all — nothing is badged onto the artwork', () => {
+  for (const extra of [{}, { album_name: 'Die Lit', is_single: false }, { is_single: true }]) {
     const activity = createPresenceActivity(HOME, playing(extra))
-    assert.equal(activity.smallImageText, undefined, `hover text for ${JSON.stringify(extra)}`)
-    assert.equal(activity.smallImageKey, undefined, `badge for ${JSON.stringify(extra)}`)
+    assert.equal(activity.smallImageKey, undefined)
+    assert.equal(activity.smallImageText, undefined)
   }
 })
 
@@ -382,59 +369,4 @@ test('browsing mid-song does not rename the artist to the page you are on', () =
   // name comes from the payload, while only the art may fall back to the URL.
   const activity = createPresenceActivity('https://unreleased.world/artist/ken-carson', playing())
   assert.equal(activity.state, 'playboi carti')
-})
-
-// ---------------------------------------------------------------------------
-// The album-hover switch.
-//
-// Whether the album can be hover-only depends on how one Discord client
-// renders a field its own documentation calls a tooltip. That is not settleable
-// from code, and settling it by rebuilding costs a release, a download and an
-// install each time. So it is a runtime setting, and both behaviours ship in
-// one build.
-// ---------------------------------------------------------------------------
-
-test('the switch OFF sends no album text in any field', () => {
-  for (const extra of [
-    { album_name: 'Die Lit', is_single: false },
-    { album_name: 'Whole Lotta Red', is_single: false, asset_key: 'album_wlr', asset_text: 'Whole Lotta Red' },
-  ]) {
-    const activity = createPresenceActivity(HOME, playing(extra), { albumHover: false })
-    assert.equal(activity.smallImageText, undefined, `small_text set for ${JSON.stringify(extra)}`)
-    assert.equal(activity.largeImageText, undefined, `large_text set for ${JSON.stringify(extra)}`)
-    // No text to hover means no reason for the badge either.
-    assert.equal(activity.smallImageKey, undefined)
-  }
-})
-
-test('the switch OFF still leaves the card itself intact', () => {
-  const activity = createPresenceActivity(HOME, playing({ album_name: 'Die Lit', is_single: false }), {
-    albumHover: false,
-  })
-  assert.equal(activity.details, 'Some Song')
-  assert.equal(activity.state, 'playboi carti')
-  assert.equal(activity.statusDisplayType, 1)
-  // The album still picks the ART even when its name is never shown.
-  assert.equal(activity.largeImageKey, 'album_die_lit')
-  assert.ok(activity.startTimestamp > 0)
-})
-
-test('the switch defaults to ON when unspecified', () => {
-  const activity = createPresenceActivity(HOME, playing({ album_name: 'Die Lit', is_single: false }))
-  assert.equal(activity.smallImageText, 'Die Lit')
-})
-
-test('the switch ON is the same as the default', () => {
-  const withFlag = createPresenceActivity(HOME, playing({ album_name: 'Die Lit', is_single: false }), {
-    albumHover: true,
-  })
-  assert.equal(withFlag.smallImageText, 'Die Lit')
-  assert.equal(withFlag.smallImageKey, FALLBACK)
-})
-
-test('the switch cannot resurrect the album for a single', () => {
-  const activity = createPresenceActivity(HOME, playing({ album_name: 'Some Song', is_single: true }), {
-    albumHover: true,
-  })
-  assert.equal(activity.smallImageText, undefined)
 })

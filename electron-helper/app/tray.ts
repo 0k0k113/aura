@@ -4,7 +4,6 @@ import * as path from 'path'
 import * as fs from 'fs'
 import { DiscordRPC } from './rpc'
 import { collectResourceMetrics } from './metrics'
-import { getSettings, updateSettings } from './settings'
 
 function resolveFirstExisting(paths: string[]): string | null {
   for (const p of paths) {
@@ -93,8 +92,7 @@ function loadTrayImage(): Electron.NativeImage {
  */
 export function createTray(
   getWindow: () => BrowserWindow | null,
-  rpc: DiscordRPC | null,
-  onAlbumHoverChanged?: () => void
+  rpc: DiscordRPC | null
 ): Tray {
   let icon: Electron.NativeImage
 
@@ -132,24 +130,6 @@ export function createTray(
   const buildMenu = () => Menu.buildFromTemplate([
     { label: 'Unreleased Presence', enabled: false },
     { label: describeStatus(), enabled: false },
-    { type: 'separator' },
-    {
-      label: 'Show album on artwork hover',
-      type: 'checkbox',
-      checked: getSettings().albumHover,
-      click: (item) => {
-        updateSettings({ albumHover: item.checked })
-        // The menu carries the checkmark, so this is a real state change, not
-        // a timer tick — rebuild it. (See the refresh loop below, which does
-        // NOT rebuild unless something actually changed.)
-        lastStatus = describeStatus()
-        tray.setContextMenu(buildMenu())
-        // Discord keeps showing the previous activity until something new
-        // arrives, so re-send the last one under the new setting rather than
-        // leaving the card stale until the next track change.
-        onAlbumHoverChanged?.()
-      },
-    },
     {
       label: 'Copy diagnostics',
       click: () => {
