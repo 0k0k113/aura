@@ -145,3 +145,105 @@ test('clearing while disconnected still records that nothing is showing', () => 
 test.after(() => {
   mock.timers.reset()
 })
+
+// ---------------------------------------------------------------------------
+// Pending-request accounting.
+//
+// @xhayper/discord-rpc files every request in a `nonceMap` keyed by a random
+// UUID, and the ONLY thing that removes an entry is a reply carrying the same
+// nonce. On transport close it rejects each pending entry and then leaves it
+// in the map — nothing deletes it, ever. Each leftover holds a resolve/reject
+// pair and an RPCError with a captured stack, and the map survives reconnects,
+// so a long session that bounces Discord grows one for the life of the process.
+// ---------------------------------------------------------------------------
+
+/** A pending entry shaped like the library's. */
+function pending() {
+  let rejected = false
+  return {
+    entry: {
+      resolve() {},
+      reject() {
+        rejected = true
+      },
+      error: new Error('RPC error'),
+    },
+    wasRejected: () => rejected,
+  }
+}
+
+function fill(rpc, count) {
+  const entries = []
+  for (let i = 0; i < count; i++) {
+    const p = pending()
+    entries.push(p)
+    rpc.client.nonceMap.set(`nonce-${i}`, p.entry)
+  }
+  return entries
+}
+
+function rpcWithNonceMap() {
+  const { rpc, calls } = connectedRpc()
+  rpc.client.nonceMap = new Map()
+  return { rpc, calls }
+}
+
+test('a disconnect empties the map the library would have left behind', () => {
+  const { rpc } = rpcWithNonceMap()
+  fill(rpc, 12)
+  assert.equal(rpc.client.nonceMap.size, 12)
+
+  // The library rejects these, emits 'disconnected', and leaves them in place.
+  rpc.client.nonceMap.forEach((p) => p.reject(p.error))
+  rpc.releasePendingRequests()
+
+  assert.equal(rpc.client.nonceMap.size, 0)
+})
+
+test('reconnect cycles do not accumulate — the whole point', () => {
+  const { rpc } = rpcWithNonceMap()
+  for (let cycle = 0; cycle < 20; cycle++) {
+    fill(rpc, 5)
+    rpc.releasePendingRequests()
+  }
+  assert.equal(rpc.client.nonceMap.size, 0, 'entries survived across reconnects')
+})
+
+test('replies Discord never sends are bounded while still connected', () => {
+  const { rpc } = rpcWithNonceMap()
+  const entries = fill(rpc, 200) // Discord went quiet; nothing is answering
+
+  rpc.setActivity(card('Some Song'), true) // dispatch prunes
+
+  assert.ok(rpc.client.nonceMap.size <= 32, `map still holds ${rpc.client.nonceMap.size}`)
+  // Rejecting is what settles the promise and releases its closures; silently
+  // deleting would leave every caller waiting forever.
+  assert.ok(entries.every((e) => e.wasRejected()), 'pruned entries were dropped unsettled')
+})
+
+test('a healthy request in flight is left alone', () => {
+  const { rpc } = rpcWithNonceMap()
+  const entries = fill(rpc, 3)
+
+  rpc.setActivity(card('Some Song'), true)
+
+  assert.equal(rpc.client.nonceMap.size, 3)
+  assert.ok(entries.every((e) => !e.wasRejected()))
+})
+
+test('the pending count is reported, so growth is visible in diagnostics', () => {
+  const { rpc } = rpcWithNonceMap()
+  assert.equal(rpc.getStatus().pendingRequests, 0)
+  fill(rpc, 7)
+  assert.equal(rpc.getStatus().pendingRequests, 7)
+})
+
+test('a library that no longer exposes nonceMap degrades to a no-op', () => {
+  const { rpc, calls } = connectedRpc()
+  delete rpc.client.nonceMap
+
+  assert.doesNotThrow(() => rpc.releasePendingRequests())
+  assert.doesNotThrow(() => rpc.setActivity(card('Some Song'), true))
+  assert.equal(rpc.getStatus().pendingRequests, 0)
+  assert.equal(calls.set.length, 1, 'activities still get sent')
+})
