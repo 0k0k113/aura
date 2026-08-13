@@ -383,3 +383,58 @@ test('browsing mid-song does not rename the artist to the page you are on', () =
   const activity = createPresenceActivity('https://unreleased.world/artist/ken-carson', playing())
   assert.equal(activity.state, 'playboi carti')
 })
+
+// ---------------------------------------------------------------------------
+// The album-hover switch.
+//
+// Whether the album can be hover-only depends on how one Discord client
+// renders a field its own documentation calls a tooltip. That is not settleable
+// from code, and settling it by rebuilding costs a release, a download and an
+// install each time. So it is a runtime setting, and both behaviours ship in
+// one build.
+// ---------------------------------------------------------------------------
+
+test('the switch OFF sends no album text in any field', () => {
+  for (const extra of [
+    { album_name: 'Die Lit', is_single: false },
+    { album_name: 'Whole Lotta Red', is_single: false, asset_key: 'album_wlr', asset_text: 'Whole Lotta Red' },
+  ]) {
+    const activity = createPresenceActivity(HOME, playing(extra), { albumHover: false })
+    assert.equal(activity.smallImageText, undefined, `small_text set for ${JSON.stringify(extra)}`)
+    assert.equal(activity.largeImageText, undefined, `large_text set for ${JSON.stringify(extra)}`)
+    // No text to hover means no reason for the badge either.
+    assert.equal(activity.smallImageKey, undefined)
+  }
+})
+
+test('the switch OFF still leaves the card itself intact', () => {
+  const activity = createPresenceActivity(HOME, playing({ album_name: 'Die Lit', is_single: false }), {
+    albumHover: false,
+  })
+  assert.equal(activity.details, 'Some Song')
+  assert.equal(activity.state, 'playboi carti')
+  assert.equal(activity.statusDisplayType, 1)
+  // The album still picks the ART even when its name is never shown.
+  assert.equal(activity.largeImageKey, 'album_die_lit')
+  assert.ok(activity.startTimestamp > 0)
+})
+
+test('the switch defaults to ON when unspecified', () => {
+  const activity = createPresenceActivity(HOME, playing({ album_name: 'Die Lit', is_single: false }))
+  assert.equal(activity.smallImageText, 'Die Lit')
+})
+
+test('the switch ON is the same as the default', () => {
+  const withFlag = createPresenceActivity(HOME, playing({ album_name: 'Die Lit', is_single: false }), {
+    albumHover: true,
+  })
+  assert.equal(withFlag.smallImageText, 'Die Lit')
+  assert.equal(withFlag.smallImageKey, FALLBACK)
+})
+
+test('the switch cannot resurrect the album for a single', () => {
+  const activity = createPresenceActivity(HOME, playing({ album_name: 'Some Song', is_single: true }), {
+    albumHover: true,
+  })
+  assert.equal(activity.smallImageText, undefined)
+})

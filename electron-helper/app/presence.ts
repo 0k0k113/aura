@@ -256,9 +256,15 @@ function extractContextFromUrl(url: string): PresencePayload {
  * caller only ever calls setActivity would freeze the last card in place
  * forever, which looks exactly like a paused track that never went away.
  */
+export interface PresenceOptions {
+  /** Show the album on the artwork hover. Off sends no album text at all. */
+  albumHover?: boolean
+}
+
 export function createPresenceActivity(
   currentUrl: string,
-  payload?: PresencePayload
+  payload?: PresencePayload,
+  options: PresenceOptions = {}
 ): SetActivity | null {
   try {
     const urlContext = extractContextFromUrl(currentUrl)
@@ -282,7 +288,7 @@ export function createPresenceActivity(
 
     const cleanedArtist = cleanArtistName(artist_name)
 
-    const albumText = albumHoverText(merged)
+    const albumText = options.albumHover === false ? undefined : albumHoverText(merged)
 
     const details = truncate(track_title || 'Untitled', 128)
     if (!details || details.trim().length === 0) return null
