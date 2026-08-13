@@ -14,6 +14,9 @@ export interface RpcStatus {
   lastActivityAt: number | null
   lastError: string | null
   clientIdPresent: boolean
+  /** Requests filed with the Discord client that have not been answered.
+   * Should sit at 0-1; a number that climbs with uptime is a leak. */
+  pendingRequests: number
 }
 
 export class DiscordRPC {
@@ -27,6 +30,9 @@ export class DiscordRPC {
   private lastUpdateTime = 0
   private readonly THROTTLE_MS = 1000
   private readonly RECONNECT_DELAY = 5000
+  /** We only ever send SetActivity, at most once a second. More than this many
+   * unanswered means replies are not coming back, not that we are busy. */
+  private static readonly MAX_PENDING_REQUESTS = 32
 
   // Diagnostics. Presence failing used to be completely invisible: the only
   // signal was a console.log nobody could see, in a window with no devtools.
@@ -52,6 +58,7 @@ export class DiscordRPC {
     this.client.on('disconnected', () => {
       console.warn('[RPC] Disconnected from Discord — will retry')
       this.connected = false
+      this.releasePendingRequests()
       this.scheduleReconnect()
     })
   }
@@ -86,6 +93,69 @@ export class DiscordRPC {
   }
 
   /**
+   * Drop the client's record of requests Discord will never answer.
+   *
+   * `Client.request()` files every call in a `nonceMap` keyed by a random
+   * UUID, and the ONLY thing that removes an entry is a reply carrying the
+   * same nonce. On transport close the library rejects each pending entry —
+   * and then leaves it in the map. Nothing ever deletes it.
+   *
+   * Every leftover holds a resolve/reject pair and an RPCError with a captured
+   * stack trace, and the map survives reconnects, so a long session that
+   * bounces Discord (a restart, a sleep/wake) accumulates them for as long as
+   * the app runs. Small individually; unbounded is the problem, and it is in
+   * the main process, which is where "the whole machine feels slower" comes
+   * from.
+   *
+   * Called after the library has already settled those promises, so removing
+   * the entries discards nothing a caller is still waiting on.
+   */
+  private releasePendingRequests(): void {
+    const map = this.pendingRequestMap()
+    if (!map || map.size === 0) return
+    const dropped = map.size
+    map.clear()
+    console.warn(`[RPC] Released ${dropped} pending request(s) after disconnect`)
+  }
+
+  /**
+   * The same map, pruned while CONNECTED.
+   *
+   * A request Discord simply never answers has no timeout and no close event
+   * to clean it up, so it would sit there for the life of the process. We only
+   * ever send SetActivity, at most once a second, so anything beyond a handful
+   * outstanding means replies are not coming back. Rejecting them settles the
+   * promises — which is what actually releases the closures — and the catch in
+   * `dispatch` records the drop.
+   */
+  private prunePendingRequests(): void {
+    const map = this.pendingRequestMap()
+    if (!map || map.size <= DiscordRPC.MAX_PENDING_REQUESTS) return
+
+    for (const [nonce, pending] of Array.from(map.entries())) {
+      map.delete(nonce)
+      try {
+        pending?.reject?.(pending.error ?? new Error('Discord never answered this request'))
+      } catch {
+        /* the caller's own handler threw; the entry is gone either way */
+      }
+    }
+  }
+
+  /** `nonceMap` is `private` in the typings but a plain instance property at
+   * runtime. Reached defensively so a library change degrades to a no-op. */
+  private pendingRequestMap():
+    | Map<string, { reject?: (reason?: unknown) => void; error?: Error }>
+    | null {
+    try {
+      const map = (this.client as unknown as { nonceMap?: unknown }).nonceMap
+      return map instanceof Map ? map : null
+    } catch {
+      return null
+    }
+  }
+
+  /**
    * Hand an activity to Discord.
    *
    * `client.user` is populated from Discord's READY payload and is what
@@ -96,6 +166,8 @@ export class DiscordRPC {
    * of swallowed.
    */
   private dispatch(presence: SetActivity): void {
+    // Cheap, and this is the one place that runs on every activity.
+    this.prunePendingRequests()
     const user = this.client.user
 
     if (!user) {
@@ -232,6 +304,7 @@ export class DiscordRPC {
       lastActivityAt: this.lastActivityAt,
       lastError: this.lastError,
       clientIdPresent: this.clientIdPresent,
+      pendingRequests: this.pendingRequestMap()?.size ?? 0,
     }
   }
 

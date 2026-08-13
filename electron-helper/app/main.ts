@@ -504,7 +504,7 @@ if (!gotTheLock) {
     initializeRPC()
     setupIPC()
 
-    createTray(mainWindow, rpc)
+    createTray(() => mainWindow, rpc)
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {

@@ -81,8 +81,17 @@ function loadTrayImage(): Electron.NativeImage {
   return img.resize({ width: 16, height: 16 })
 }
 
+/**
+ * `getWindow` is a getter, not a window.
+ *
+ * On macOS closing the window does not quit the app — `app.on('activate')`
+ * builds a NEW BrowserWindow. A captured reference would still point at the
+ * destroyed one, so every tray action ("Open unreleasd.world", "Clear All
+ * Data") silently targeted a window that no longer existed for the rest of
+ * the session. Resolving it per click always finds the live window.
+ */
 export function createTray(
-  window: BrowserWindow | null,
+  getWindow: () => BrowserWindow | null,
   rpc: DiscordRPC | null
 ): Tray {
   let icon: Electron.NativeImage
@@ -124,7 +133,7 @@ export function createTray(
       click: () => {
         const report = {
           appVersion: require('electron').app.getVersion(),
-          url: window?.webContents?.getURL() ?? null,
+          url: getWindow()?.webContents?.getURL() ?? null,
           discord: rpc ? rpc.getStatus() : { connected: false, reason: 'RPC not initialized' },
           // CPU and memory per process, with uptime. A slowdown report is
           // otherwise unfalsifiable once the app has been quit.
@@ -141,7 +150,8 @@ export function createTray(
     {
       label: 'Open unreleasd.world',
       click: () => {
-        if (window) {
+        const window = getWindow()
+        if (window && !window.isDestroyed()) {
           if (window.isMinimized()) window.restore()
           window.show()
           window.focus()
@@ -165,7 +175,8 @@ export function createTray(
     {
       label: 'Clear All Data',
       click: async () => {
-        if (window && window.webContents) {
+        const window = getWindow()
+        if (window && !window.isDestroyed() && window.webContents) {
           try {
             await window.webContents.executeJavaScript(
               `
@@ -252,7 +263,8 @@ export function createTray(
   }, 5000)
 
   tray.on('click', () => {
-    if (window) {
+    const window = getWindow()
+    if (window && !window.isDestroyed()) {
       if (window.isVisible()) {
         window.hide()
       } else {
