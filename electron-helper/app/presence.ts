@@ -117,22 +117,6 @@ function artistAssetKey(artistName: string | undefined): string {
   return slug ? `artist_${slug}` : FALLBACK_ASSET_KEY
 }
 
-/**
- * The album, for the cover-art tooltip.
- *
- * An alias's `asset_text` wins — it exists precisely because Discord refused
- * the real album title as an asset NAME while still displaying it happily.
- * Singles get nothing: their "album" is the track title, already printed
- * directly above, so a tooltip repeating it is noise.
- */
-function albumHoverText(payload: PresencePayload): string | undefined {
-  if (isSingleTrack(payload)) return undefined
-  const aliased = payload.asset_text?.trim()
-  if (aliased) return aliased
-  const album = payload.album_name?.trim()
-  return album || undefined
-}
-
 function isSingleTrack(payload: PresencePayload): boolean {
   // Classification order (first match wins):
   if (payload.is_single === true) return true
@@ -256,15 +240,9 @@ function extractContextFromUrl(url: string): PresencePayload {
  * caller only ever calls setActivity would freeze the last card in place
  * forever, which looks exactly like a paused track that never went away.
  */
-export interface PresenceOptions {
-  /** Show the album on the artwork hover. Off sends no album text at all. */
-  albumHover?: boolean
-}
-
 export function createPresenceActivity(
   currentUrl: string,
-  payload?: PresencePayload,
-  options: PresenceOptions = {}
+  payload?: PresencePayload
 ): SetActivity | null {
   try {
     const urlContext = extractContextFromUrl(currentUrl)
@@ -287,8 +265,6 @@ export function createPresenceActivity(
     if (!track_title && !artist_name) return null
 
     const cleanedArtist = cleanArtistName(artist_name)
-
-    const albumText = options.albumHover === false ? undefined : albumHoverText(merged)
 
     const details = truncate(track_title || 'Untitled', 128)
     if (!details || details.trim().length === 0) return null
@@ -319,22 +295,22 @@ export function createPresenceActivity(
       // field; there is no second field for image text, so "album on hover but
       // not as a line" is not expressible. Setting it was tried and produced
       // exactly that unwanted line, so the line wins and the hover is the cost.
-      // ── The album goes on the SMALL image, not the large one ──────────────
+      // No album name, anywhere. Settled after trying every field Discord
+      // offers:
       //
-      // Discord documents `large_text` as "text displayed when hovering over
-      // the large image" — official docs and the reverse-engineered client
-      // docs agree. This client does not: it renders large_text as a LINE in
-      // the card, between the track title and the artist, AND as the tooltip.
-      // Setting it gave the hover back but dragged that line along with it.
+      //   • `large_text` is documented as the large image's hover tooltip, but
+      //     this client ALSO paints it as a line between the track title and
+      //     the artist — hover and line arrive together, and the line was not
+      //     wanted.
+      //   • `small_text` genuinely is hover-only, but it needs a small image to
+      //     hover, and that badge sits on the corner of the artwork rather than
+      //     being the artwork. Hovering the cover itself still showed nothing.
       //
-      // `small_text` is a separate field with its own hover target, and it has
-      // never been part of any card line layout. So the album moves there, and
-      // the small image exists to give it something to hover: the site logo,
-      // badged on the corner of the artwork the way Spotify badges its own.
-      // Large text stays empty, which is what keeps the line away.
+      // There is no third image-text field, so "album on the cover's hover and
+      // nowhere else" is not expressible here — whatever Spotify does for its
+      // own card is not available to a third-party app. The album still selects
+      // the ART; its name is simply never printed.
       largeImageText: undefined,
-      smallImageKey: albumText ? FALLBACK_ASSET_KEY : undefined,
-      smallImageText: truncate(albumText, 128),
       // No buttons on the now-playing card.
       buttons: undefined,
     }
@@ -367,7 +343,6 @@ export function createPresenceActivity(
       state: presence.state || '(empty)',
       img: presence.largeImageKey,
       imgTxt: presence.largeImageText,
-      smallTxt: presence.smallImageText,
       memberList: presence.statusDisplayType === 1 ? presence.state : presence.name,
       hasTimer: !!(presence as any).startTimestamp
     }, trace_id)
