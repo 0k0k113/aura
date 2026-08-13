@@ -117,6 +117,22 @@ function artistAssetKey(artistName: string | undefined): string {
   return slug ? `artist_${slug}` : FALLBACK_ASSET_KEY
 }
 
+/**
+ * What the cover art says on hover: the album.
+ *
+ * An alias's `asset_text` wins — it exists precisely because Discord refused
+ * the real album title as an asset NAME, while still being happy to display
+ * it. Singles get nothing: their "album" is the track title, already printed
+ * directly above, so a tooltip repeating it is just noise.
+ */
+function coverHoverText(payload: PresencePayload): string | undefined {
+  if (isSingleTrack(payload)) return undefined
+  const aliased = payload.asset_text?.trim()
+  if (aliased) return aliased
+  const album = payload.album_name?.trim()
+  return album || undefined
+}
+
 function isSingleTrack(payload: PresencePayload): boolean {
   // Classification order (first match wins):
   if (payload.is_single === true) return true
@@ -287,13 +303,15 @@ export function createPresenceActivity(
       // carries the artist when the caller omitted it, and the ART is allowed
       // to fall back that way even though the printed name is not.
       largeImageKey: getTrackImageKey(merged),
-      // Nothing. Discord has exactly ONE cover-art text field (`large_text`)
-      // and its client paints it as a line in the now-playing card, not only
-      // as the hover tooltip — which is how the album name ended up in the
-      // embed, and how this field previously showed the artist a second time.
-      // Aliases still supply the ART via `asset_key`; only their display text
-      // is withheld, since it is the album title too.
-      largeImageText: undefined,
+      // The album, shown when you hover the cover art — where Spotify puts it.
+      //
+      // This was emptied once on the theory that Discord paints `large_text`
+      // as a line inside the card. It does not: it is the image's tooltip, and
+      // emptying it did not remove a line, it removed the hover. The duplicate
+      // row that prompted all this came from this field holding the ARTIST
+      // while `state` had just started showing the artist too — two copies of
+      // one name, not the album.
+      largeImageText: truncate(coverHoverText(merged), 128),
       // No buttons on the now-playing card.
       buttons: undefined,
     }

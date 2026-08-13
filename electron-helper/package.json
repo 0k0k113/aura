@@ -1,6 +1,6 @@
 {
   "name": "unreleasd-presence-helper",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Electron helper for Discord Rich Presence integration",
   "main": "dist/main.js",
   "type": "commonjs",
