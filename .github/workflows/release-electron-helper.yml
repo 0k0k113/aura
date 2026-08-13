@@ -215,57 +215,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.name }}
+          NOTES: electron-helper/RELEASE_NOTES.md
         run: |
-          cat > notes.md <<'NOTES'
-          ## Install on macOS — one command, no security prompts
-
-          ```
-          curl -fsSL https://unreleased.world/install.sh | sh
-          ```
-
-          Paste that into Terminal. It picks the right build for your Mac,
-          verifies the app's signature, installs it and opens it.
-
-          Why this is the easy path: these builds are code-signed but not
-          notarized by Apple (notarization needs a paid Developer account).
-          Anything a **browser** downloads gets tagged with macOS's quarantine
-          flag, and Gatekeeper won't open a non-notarized app carrying that tag
-          without a trip through System Settings. `curl` doesn't set that tag.
-          The script is short and commented — read it at
-          https://unreleased.world/install.sh before running it.
-
-          ### Or download the app directly
-
-          - **Apple Silicon (M1–M4):** `Unreleased-Presence-mac-arm64.dmg`
-          - **Intel Mac:** `Unreleased-Presence-mac-x64.dmg`
-          - **Windows:** `Unreleased-Presence-win-x64.exe`
-
-          Drag it to Applications, double-click, then allow it in
-          **System Settings → Privacy & Security → "Open Anyway"**.
-          (On macOS 14 and earlier you can instead right-click → Open. Apple
-          removed that shortcut in macOS 15.)
-
-          ### "It says the app is damaged"
-
-          It isn't. That message means macOS found no valid signature, and it
-          came from older builds that shipped completely unsigned — which Apple
-          Silicon refuses to run. **This release is signed**, so downloading it
-          fixes the problem. If it somehow persists:
-
-          ```
-          xattr -dr com.apple.quarantine "/Applications/Unreleased Presence.app"
-          ```
-
-          ### Requirements
-
-          - macOS 11 (Big Sur) or newer, or Windows 10/11
-          - The Discord desktop app running on the same machine
-          NOTES
-
+          # The install instructions live in the repo (RELEASE_NOTES.md), not in
+          # a heredoc buried in CI, so rewriting them is a normal reviewable
+          # change to a markdown file.
+          #
+          # `gh release edit` on the existing-release path is the load-bearing
+          # half. Every build reuses one tag, so `gh release create` runs exactly
+          # once in the life of that tag — which meant the notes froze at whatever
+          # the FIRST run published and every later rewrite reached the repo but
+          # never the release page. Uploading assets without also pushing the
+          # notes is how the page ended up describing only macOS long after
+          # Windows and Linux builds were shipping beside it.
+          test -f "$NOTES"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" artifacts/* --clobber
+            gh release edit "$TAG" --title "$TAG" --notes-file "$NOTES"
           else
-            gh release create "$TAG" artifacts/* \
-              --title "$TAG" \
-              --notes-file notes.md
+            gh release create "$TAG" artifacts/* --title "$TAG" --notes-file "$NOTES"
           fi
