@@ -23,6 +23,7 @@ loadEnvironment()
 import { app, BrowserWindow, ipcMain, shell, Notification } from 'electron'
 import { DiscordRPC } from './rpc'
 import { collectResourceMetrics } from './metrics'
+import { getSettings } from './settings'
 import { createPresenceActivity } from './presence'
 import { createTray } from './tray'
 import { buildAllowedOrigins, isOriginAllowed, normalizeOrigin, ORIGINS_ARGV_PREFIX } from './origins'
@@ -42,6 +43,11 @@ let lastPosition = -1
 let lastIsPlaying: boolean | undefined
 const debugEnabled = process.env.UNRL_PRESENCE_LOG === '1'
 let seq = 0
+/** The last payload that produced a card, kept so a settings change can be
+ * applied to what is on screen NOW. Discord holds the previous activity until
+ * something new arrives, so without this a toggle would appear to do nothing
+ * until the next track. */
+let lastPresencePayload: z.infer<typeof presencePayloadSchema> | null = null
 
 // Diagnostics for `presence:ping`. Without these, "presence isn't working" is
 // unanswerable: there is no way to tell whether the web app never called, the
@@ -247,7 +253,10 @@ function setupIPC(): void {
       })
 
       const currentUrl = mainWindow?.webContents.getURL() || ''
-      const activity = createPresenceActivity(currentUrl, payloadWithConvertedTimestamp)
+      lastPresencePayload = payloadWithConvertedTimestamp
+      const activity = createPresenceActivity(currentUrl, payloadWithConvertedTimestamp, {
+        albumHover: getSettings().albumHover,
+      })
 
       if (activity) {
         diagnostics.activitiesBuilt++
@@ -504,7 +513,18 @@ if (!gotTheLock) {
     initializeRPC()
     setupIPC()
 
-    createTray(() => mainWindow, rpc)
+    createTray(() => mainWindow, rpc, () => {
+      // Rebuild the CURRENT card under the new setting and push it straight
+      // out, bypassing the throttle — a preference toggle should be visible
+      // in Discord immediately, not at the next track change.
+      if (!rpc || !lastPresencePayload) return
+      const url = mainWindow?.webContents.getURL() || ''
+      const activity = createPresenceActivity(url, lastPresencePayload, {
+        albumHover: getSettings().albumHover,
+      })
+      if (activity) rpc.setActivity(activity, true)
+      else rpc.clearActivity()
+    })
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
