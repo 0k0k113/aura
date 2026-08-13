@@ -136,7 +136,24 @@ jobs:
           for var in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
             if [ -z "${!var:-}" ]; then unset "$var"; fi
           done
-          ${{ matrix.command }}
+
+          # electron-builder fetches its own toolchain (Electron itself, the
+          # NSIS binaries, winCodeSign) from GitHub releases mid-build, through
+          # a code path named DownloadNoRetry — so one EOF on a 1.3MB file ends
+          # the whole build. That has already failed Windows on main:
+          #   Get ".../nsis-resources-3.4.1.7z": EOF   at DownloadNoRetry
+          # Retrying the build is the only place a retry can go, since the
+          # download is buried inside it. Anything already fetched lands in
+          # electron-builder's cache, so a second attempt has less to pull.
+          for attempt in 1 2 3; do
+            if ${{ matrix.command }}; then
+              exit 0
+            fi
+            echo "build failed (attempt $attempt of 3)"
+            sleep $((attempt * 20))
+          done
+          echo "build failed after 3 attempts"
+          exit 1
 
       - name: Verify macOS signature
         if: startsWith(matrix.os, 'macos')
