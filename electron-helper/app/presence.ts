@@ -118,14 +118,14 @@ function artistAssetKey(artistName: string | undefined): string {
 }
 
 /**
- * What the cover art says on hover: the album.
+ * The album, for the cover-art tooltip.
  *
  * An alias's `asset_text` wins — it exists precisely because Discord refused
- * the real album title as an asset NAME, while still being happy to display
- * it. Singles get nothing: their "album" is the track title, already printed
- * directly above, so a tooltip repeating it is just noise.
+ * the real album title as an asset NAME while still displaying it happily.
+ * Singles get nothing: their "album" is the track title, already printed
+ * directly above, so a tooltip repeating it is noise.
  */
-function coverHoverText(payload: PresencePayload): string | undefined {
+function albumHoverText(payload: PresencePayload): string | undefined {
   if (isSingleTrack(payload)) return undefined
   const aliased = payload.asset_text?.trim()
   if (aliased) return aliased
@@ -282,6 +282,8 @@ export function createPresenceActivity(
 
     const cleanedArtist = cleanArtistName(artist_name)
 
+    const albumText = albumHoverText(merged)
+
     const details = truncate(track_title || 'Untitled', 128)
     if (!details || details.trim().length === 0) return null
 
@@ -303,15 +305,30 @@ export function createPresenceActivity(
       // carries the artist when the caller omitted it, and the ART is allowed
       // to fall back that way even though the printed name is not.
       largeImageKey: getTrackImageKey(merged),
-      // The album, shown when you hover the cover art — where Spotify puts it.
+      // Empty, and it has to stay empty.
       //
-      // This was emptied once on the theory that Discord paints `large_text`
-      // as a line inside the card. It does not: it is the image's tooltip, and
-      // emptying it did not remove a line, it removed the hover. The duplicate
-      // row that prompted all this came from this field holding the ARTIST
-      // while `state` had just started showing the artist too — two copies of
-      // one name, not the album.
-      largeImageText: truncate(coverHoverText(merged), 128),
+      // `large_text` is documented as the cover art's hover tooltip, and it is
+      // — but this Discord client ALSO paints it as a line in the card, between
+      // the track title and the artist. Both behaviours come from this one
+      // field; there is no second field for image text, so "album on hover but
+      // not as a line" is not expressible. Setting it was tried and produced
+      // exactly that unwanted line, so the line wins and the hover is the cost.
+      // ── The album goes on the SMALL image, not the large one ──────────────
+      //
+      // Discord documents `large_text` as "text displayed when hovering over
+      // the large image" — official docs and the reverse-engineered client
+      // docs agree. This client does not: it renders large_text as a LINE in
+      // the card, between the track title and the artist, AND as the tooltip.
+      // Setting it gave the hover back but dragged that line along with it.
+      //
+      // `small_text` is a separate field with its own hover target, and it has
+      // never been part of any card line layout. So the album moves there, and
+      // the small image exists to give it something to hover: the site logo,
+      // badged on the corner of the artwork the way Spotify badges its own.
+      // Large text stays empty, which is what keeps the line away.
+      largeImageText: undefined,
+      smallImageKey: albumText ? FALLBACK_ASSET_KEY : undefined,
+      smallImageText: truncate(albumText, 128),
       // No buttons on the now-playing card.
       buttons: undefined,
     }
@@ -344,6 +361,7 @@ export function createPresenceActivity(
       state: presence.state || '(empty)',
       img: presence.largeImageKey,
       imgTxt: presence.largeImageText,
+      smallTxt: presence.smallImageText,
       memberList: presence.statusDisplayType === 1 ? presence.state : presence.name,
       hasTimer: !!(presence as any).startTimestamp
     }, trace_id)

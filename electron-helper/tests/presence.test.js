@@ -220,46 +220,54 @@ test('the artist appears exactly ONCE — no stacked duplicate row', () => {
   }
 })
 
-test('the album is the cover-art HOVER, never a printed line', () => {
-  // Discord's large_text is the image tooltip. Emptying it once did not remove
-  // a line from the card — it removed the hover, which is the one place the
-  // album is wanted (Spotify does the same).
+test('the album is NEVER in large_text — that is what draws the unwanted line', () => {
+  // Discord documents large_text as the large image's hover tooltip, and both
+  // the official and reverse-engineered docs say so. This client disagrees: it
+  // ALSO paints large_text as a line between the track title and the artist.
+  // Whatever it is called, nothing may travel in it.
   const cases = [
-    // [payload, art key, expected hover]
-    [{ album_name: 'Die Lit', is_single: false }, 'album_die_lit', 'Die Lit'],
-    [
-      { album_name: 'Whole Lotta Red', is_single: false, asset_key: 'album_wlr', asset_text: 'Whole Lotta Red' },
-      'album_wlr',
-      'Whole Lotta Red',
-    ],
-    // A real alias: Discord refuses the true title as an asset NAME but will
-    // happily display it, which is exactly what asset_text is for.
-    [{ album_name: 'Forever, ILY', is_single: false, asset_text: 'Forever, ILY' }, 'album_forever_ily', 'Forever, ILY'],
+    { album_name: 'Die Lit', is_single: false },
+    { album_name: 'Whole Lotta Red', is_single: false, asset_key: 'album_wlr', asset_text: 'Whole Lotta Red' },
+    { album_name: 'Forever, ILY', is_single: false, asset_text: 'Forever, ILY' },
+    {},
   ]
-  for (const [extra, expectedKey, expectedHover] of cases) {
+  for (const extra of cases) {
     const activity = createPresenceActivity(HOME, playing(extra))
-    assert.equal(activity.largeImageText, expectedHover, `hover wrong for ${JSON.stringify(extra)}`)
-    // …and still nowhere in the lines Discord prints.
-    assert.ok(
-      ![activity.details, activity.state].includes(extra.album_name),
-      `album leaked into a printed line for ${JSON.stringify(extra)}`,
-    )
-    assert.equal(activity.largeImageKey, expectedKey)
+    assert.equal(activity.largeImageText, undefined, `large_text set for ${JSON.stringify(extra)}`)
   }
 })
 
-test('an alias display text beats the raw album title in the hover', () => {
-  const activity = createPresenceActivity(HOME, playing({
-    album_name: 'if looks could kill (directors cut)',
-    is_single: false,
-    asset_key: 'album_ilckd',
-    asset_text: 'If Looks Could Kill (Directors Cut)',
-  }))
-  assert.equal(activity.largeImageText, 'If Looks Could Kill (Directors Cut)')
-  assert.equal(activity.largeImageKey, 'album_ilckd')
+test('the album rides on small_text instead, so it hovers without a line', () => {
+  // small_text is a separate field with its own hover target (the small image)
+  // and has never been part of any card line layout.
+  const cases = [
+    [{ album_name: 'Die Lit', is_single: false }, 'Die Lit', 'album_die_lit'],
+    [
+      { album_name: 'Whole Lotta Red', is_single: false, asset_key: 'album_wlr', asset_text: 'Whole Lotta Red' },
+      'Whole Lotta Red',
+      'album_wlr',
+    ],
+    // An alias's display text is the real title Discord refused as a key.
+    [
+      { album_name: 'if looks could kill (directors cut)', is_single: false, asset_key: 'album_ilckd', asset_text: 'If Looks Could Kill (Directors Cut)' },
+      'If Looks Could Kill (Directors Cut)',
+      'album_ilckd',
+    ],
+  ]
+  for (const [extra, expectedHover, expectedKey] of cases) {
+    const activity = createPresenceActivity(HOME, playing(extra))
+    assert.equal(activity.smallImageText, expectedHover, `hover wrong for ${JSON.stringify(extra)}`)
+    // The badge has to exist or there is nothing to hover.
+    assert.equal(activity.smallImageKey, FALLBACK)
+    // The large image is still the album art.
+    assert.equal(activity.largeImageKey, expectedKey)
+    // And the album is still absent from every printed line.
+    assert.ok(![activity.details, activity.state].includes(extra.album_name))
+  }
 })
 
-test('a single has no hover text — it would just repeat the track title', () => {
+test('a single gets no badge and no hover text', () => {
+  // Its "album" is the track title, already printed directly above.
   for (const extra of [
     { album_name: 'Some Song', is_single: true },
     { album_name: 'Some Song' },
@@ -268,7 +276,8 @@ test('a single has no hover text — it would just repeat the track title', () =
     {},
   ]) {
     const activity = createPresenceActivity(HOME, playing(extra))
-    assert.equal(activity.largeImageText, undefined, `single got hover text: ${JSON.stringify(extra)}`)
+    assert.equal(activity.smallImageText, undefined, `hover text for ${JSON.stringify(extra)}`)
+    assert.equal(activity.smallImageKey, undefined, `badge for ${JSON.stringify(extra)}`)
   }
 })
 
