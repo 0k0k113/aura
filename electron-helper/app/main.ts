@@ -117,7 +117,30 @@ function createWindow(): void {
       additionalArguments: [ORIGINS_ARGV_PREFIX + JSON.stringify(ALLOWED_ORIGINS)],
       webSecurity: true,
       autoplayPolicy: 'no-user-gesture-required' as any,
-      backgroundThrottling: false
+      // Deliberately left at Chromium's default (throttling ENABLED).
+      //
+      // This used to be `false`, and that one line is what let a listening
+      // session heat up a fanless MacBook until the whole machine slowed down.
+      // Electron implements the flag by setting `disable_hidden_`, which turns
+      // `RenderWidgetHostImpl::WasHidden()` into a no-op — permanently. That is
+      // the function that tells the renderer to stop producing frames when the
+      // window is occluded, and it is also what drops the process off
+      // foreground priority. With it disabled, a window sitting behind another
+      // app kept painting and kept the GPU compositing a surface nobody could
+      // see, at foreground QoS, for as long as the app was open.
+      //
+      // Nothing here needed it. Presence is pushed by the site, and the site
+      // ticks off the `<audio>` element's `timeupdate` plus a heartbeat
+      // interval — no requestAnimationFrame anywhere in that path. Media events
+      // are dispatched by the media pipeline, not a throttled task queue, and
+      // Chromium exempts audible pages from intensive timer throttling and from
+      // page freezing entirely; a background tab plays music indefinitely under
+      // the default. The worst case is that the heartbeat is aligned to one
+      // wake-up per second, and the RPC layer already throttles to 1000ms.
+      //
+      // If App Nap ever needs defeating, that is a different subsystem — use
+      // powerSaveBlocker('prevent-app-suspension'), which does not disable
+      // renderer visibility throttling.
     },
     backgroundColor: '#000000',
     title: 'Unreleased Presence'
