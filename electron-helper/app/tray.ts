@@ -38,8 +38,37 @@ function loadTrayImage(): Electron.NativeImage {
 
   candidates.push(...resCandidates)
 
-  // Dev build folder at project root (sibling to app/)
-  // dist/app/tray.js -> ../../build -> <projectRoot>/build
+  // Inside the asar archive: `files` packs `build/**/*` into the app bundle, so
+  // the icons live at app.asar/build — NOT in Contents/Resources/build.
+  //
+  // This is why no tray icon ever appeared on a packaged build. tsc emits a
+  // FLAT dist (dist/tray.js, not dist/app/tray.js), so __dirname is
+  // app.asar/dist and the '../../build' below resolves to
+  // Contents/Resources/build — the same non-existent path the resourcesPath
+  // candidates already covered. Every candidate missed, loadTrayImage fell
+  // through to nativeImage.createEmpty(), and `new Tray(<empty image>)`
+  // produces a real but INVISIBLE menu bar item: the menu is there, nothing is
+  // drawn, and everything behind it (including "Copy diagnostics") is
+  // unreachable. Electron's fs and nativeImage both read through asar, so this
+  // path works packaged; the ones below still cover unpacked layouts.
+  const asarBuild = path.join(__dirname, '../build')
+  candidates.push(
+    ...(process.platform === 'darwin'
+      ? [
+          path.join(asarBuild, 'trayTemplate.png'),
+          path.join(asarBuild, 'tray.png'),
+          path.join(asarBuild, 'icon.png'),
+        ]
+      : process.platform === 'win32'
+      ? [
+          path.join(asarBuild, 'tray.png'),
+          path.join(asarBuild, 'icon.png'),
+          path.join(asarBuild, 'icon.ico'),
+        ]
+      : [path.join(asarBuild, 'tray.png'), path.join(asarBuild, 'icon.png')]),
+  )
+
+  // Dev build folder at project root (sibling to dist/)
   const localBuild = path.join(__dirname, '../../build')
   const devCandidates =
     process.platform === 'darwin'
@@ -65,7 +94,14 @@ function loadTrayImage(): Electron.NativeImage {
   let img = chosen ? nativeImage.createFromPath(chosen) : nativeImage.createEmpty()
 
   if (img.isEmpty()) {
-    // Absolute fallback
+    // Say so. An empty image still produces a real Tray — macOS just draws
+    // nothing, so the menu bar item is invisible and everything behind it is
+    // unreachable. That failed silently for the whole life of the app; the one
+    // thing worse than no icon is no icon and no explanation.
+    console.error(
+      '[Tray] No tray icon could be loaded — the menu bar item will be INVISIBLE. Searched:\n  ' +
+        candidates.join('\n  '),
+    )
     return nativeImage.createEmpty()
   }
 
