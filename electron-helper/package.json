@@ -1,6 +1,6 @@
 {
   "name": "aura-helper",
-  "version": "1.0.16",
+  "version": "1.0.17",
   "description": "Electron helper for Discord Rich Presence integration",
   "main": "dist/main.js",
   "type": "commonjs",
