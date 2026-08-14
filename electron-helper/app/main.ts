@@ -143,7 +143,7 @@ function createWindow(): void {
       // renderer visibility throttling.
     },
     backgroundColor: '#000000',
-    title: 'Aura'
+    title: 'aura'
   })
 
   // Apex and www must both be listed: the site may redirect between them, and a
@@ -153,22 +153,28 @@ function createWindow(): void {
     return origin === withWww ? [origin] : [origin, withWww]
   }).join(' ')
 
-  // Scoped to the app's own documents.
+  // Registered WITHOUT a filter, deliberately.
   //
-  // This used to be registered with no filter, so it fired for every response
-  // the app ever received — every script, image, XHR, and every audio range
-  // request while a track streamed. Each one pauses the response in the
-  // network service, serializes all its headers into a JS object, IPCs them to
-  // the main process, rebuilds the object, and IPCs back, purely to attach a
-  // CSP that only means anything on an HTML document from our own origin.
-  // Media chunks now bypass the round trip entirely.
-  const cspUrlPatterns = ALLOWED_ORIGINS.flatMap((origin) => {
-    const withWww = origin.replace(/^(https?:\/\/)/, '$1www.')
-    const origins = origin === withWww ? [origin] : [origin, withWww]
-    return origins.map((o) => `${o}/*`)
-  })
-
-  mainWindow.webContents.session.webRequest.onHeadersReceived({ urls: cspUrlPatterns }, (details, callback) => {
+  // A previous version passed `{ urls: [...] }` here to skip the round trip for
+  // media and XHR, which is a real saving — and it shipped a completely black
+  // window. Everything between `new BrowserWindow()` and `loadURL()` below runs
+  // inside this function, so anything that throws in the gap leaves a created,
+  // visible window with `backgroundColor: '#000000'` and no page in it, and
+  // aborts the rest of app.whenReady() (taking the tray with it). Electron
+  // validates each entry in `urls` as a Chrome match pattern and throws on one
+  // it cannot parse; the generated list included ports and a `www.`-prefixed
+  // loopback address, and none of that is exercised by unit tests or by CI,
+  // which never launches the app.
+  //
+  // The optimization is still worth having, but it needs `types: ['mainFrame',
+  // 'subFrame']` — CSP only means anything on a document — rather than
+  // hand-built URL patterns, and it needs verifying against a real launch
+  // before it goes anywhere near a release.
+  //
+  // The try/catch is the actual lesson: page load must not be reachable from a
+  // failure in window setup.
+  try {
+    mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
@@ -183,7 +189,12 @@ function createWindow(): void {
         ]
       }
     })
-  })
+    })
+  } catch (error) {
+    // Losing the CSP is bad. Losing the whole window is worse, and that is what
+    // a throw here used to do — silently, with no error surface at all.
+    console.error('[Main] Failed to install the CSP handler; continuing without it:', error)
+  }
 
   // Set Chrome-like User Agent for better compatibility
   const chromeVersion = process.versions.chrome || '120.0.0.0'
@@ -490,7 +501,7 @@ function setupIPC(): void {
       mainWindow.reload()
 
       new Notification({
-        title: 'Aura',
+        title: 'aura',
         body: 'All app data cleared'
       }).show()
 

@@ -42,7 +42,7 @@ if (!hasDeveloperId) {
 
 module.exports = {
   appId: 'world.unreleased.presence',
-  productName: 'Aura',
+  productName: 'aura',
 
   directories: {
     // NOT "dist" — that is tsc's outDir. electron-builder defaults to dist/ too,
@@ -114,7 +114,7 @@ module.exports = {
     oneClick: true,
     perMachine: false,
     allowToChangeInstallationDirectory: false,
-    shortcutName: 'Aura',
+    shortcutName: 'aura',
   },
 
   linux: {

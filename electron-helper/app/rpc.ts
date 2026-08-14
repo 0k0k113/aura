@@ -190,7 +190,7 @@ export class DiscordRPC {
       this.activitiesDropped++
       this.lastError =
         'Discord connected but never identified the user, so activities cannot be set. ' +
-        'Restart Discord, then restart Aura.'
+        'Restart Discord, then restart aura.'
       console.error(`[RPC] ${this.lastError}`)
       // Reconnecting is the only thing that can recover this.
       this.connected = false

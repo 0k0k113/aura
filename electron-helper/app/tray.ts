@@ -140,7 +140,7 @@ export function createTray(
   }
 
   const tray = new Tray(icon)
-  tray.setToolTip('Aura')
+  tray.setToolTip('aura')
 
   // Presence failing used to be entirely invisible — no window, no devtools,
   // no indicator. The status line below is the one place a user can look.
@@ -164,7 +164,7 @@ export function createTray(
   }
 
   const buildMenu = () => Menu.buildFromTemplate([
-    { label: 'Aura', enabled: false },
+    { label: 'aura', enabled: false },
     { label: describeStatus(), enabled: false },
     {
       label: 'Copy diagnostics',
@@ -179,7 +179,7 @@ export function createTray(
         }
         clipboard.writeText(JSON.stringify(report, null, 2))
         new Notification({
-          title: 'Aura',
+          title: 'aura',
           body: 'Diagnostics copied to the clipboard',
         }).show()
       },
@@ -202,7 +202,7 @@ export function createTray(
         try {
           if (rpc) rpc.clearActivity()
           new Notification({
-            title: 'Aura',
+            title: 'aura',
             body: 'Presence cache cleared'
           }).show()
         } catch (e) {
@@ -254,7 +254,7 @@ export function createTray(
             window.reload()
 
             new Notification({
-              title: 'Aura',
+              title: 'aura',
               body: 'All app data cleared'
             }).show()
           } catch (error) {
@@ -269,7 +269,7 @@ export function createTray(
 
   lastStatus = describeStatus()
   tray.setContextMenu(buildMenu())
-  tray.setToolTip(`Aura — ${lastStatus}`)
+  tray.setToolTip(`aura — ${lastStatus}`)
 
   // Keep the status line honest — but ONLY redraw when it actually changed.
   //
@@ -296,7 +296,7 @@ export function createTray(
       if (status === lastStatus) return
       lastStatus = status
       tray.setContextMenu(buildMenu())
-      tray.setToolTip(`Aura — ${status}`)
+      tray.setToolTip(`aura — ${status}`)
     } catch {
       clearInterval(statusTimer)
     }
