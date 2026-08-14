@@ -19,8 +19,8 @@ carrying that tag without a trip through System Settings. `curl` never sets the
 tag, so there is nothing to approve. The script is short and commented — read it
 at https://unreleased.world/install.sh before running it.
 
-**Or download it yourself:** `Unreleased-Presence-mac-arm64.dmg` for Apple
-Silicon (M1–M4), `Unreleased-Presence-mac-x64.dmg` for Intel. Drag it to
+**Or download it yourself:** `Aura-mac-arm64.dmg` for Apple
+Silicon (M1–M4), `Aura-mac-x64.dmg` for Intel. Drag it to
 Applications, double-click, then allow it in **System Settings → Privacy &
 Security → "Open Anyway"**. (On macOS 14 and earlier you can right-click → Open
 instead. Apple removed that shortcut in macOS 15.)
@@ -33,20 +33,20 @@ run. **This release is signed**, so downloading it again fixes the problem. If
 it somehow persists:
 
 ```
-xattr -dr com.apple.quarantine "/Applications/Unreleased Presence.app"
+xattr -dr com.apple.quarantine "/Applications/Aura.app"
 ```
 
 ## Windows — download and run
 
-Download **`Unreleased-Presence-win-x64.exe`** and run it. That's the whole
+Download **`Aura-win-x64.exe`** and run it. That's the whole
 install.
 
 The Windows build is unsigned, so SmartScreen shows "Windows protected your PC"
 the first time. It is two clicks past: **More info → Run anyway**. The setup
 wizard handles the rest.
 
-`Unreleased-Presence-win-ia32.exe` is for 32-bit Windows; take it only if you
-know you need it. `Unreleased-Presence-win.exe` bundles both architectures in
+`Aura-win-ia32.exe` is for 32-bit Windows; take it only if you
+know you need it. `Aura-win.exe` bundles both architectures in
 one much larger file and is only useful for redistribution.
 
 ## Linux
@@ -54,14 +54,14 @@ one much larger file and is only useful for redistribution.
 AppImage — runs on any distribution, no install:
 
 ```
-chmod +x Unreleased-Presence-linux-x86_64.AppImage
-./Unreleased-Presence-linux-x86_64.AppImage
+chmod +x Aura-linux-x86_64.AppImage
+./Aura-linux-x86_64.AppImage
 ```
 
 Debian and Ubuntu:
 
 ```
-sudo apt install ./Unreleased-Presence-linux-amd64.deb
+sudo apt install ./Aura-linux-amd64.deb
 ```
 
 If Discord itself came from Flatpak, its RPC socket lives inside the sandbox and

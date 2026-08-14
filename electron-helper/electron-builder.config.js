@@ -42,7 +42,7 @@ if (!hasDeveloperId) {
 
 module.exports = {
   appId: 'world.unreleased.presence',
-  productName: 'Unreleased Presence',
+  productName: 'Aura',
 
   directories: {
     // NOT "dist" — that is tsc's outDir. electron-builder defaults to dist/ too,
@@ -62,10 +62,10 @@ module.exports = {
     category: 'public.app-category.music',
     icon: 'build/icon-mac.png',
     // No ${version}: a stable filename makes
-    //   /releases/latest/download/Unreleased-Presence-mac-arm64.dmg
+    //   /releases/latest/download/Aura-mac-arm64.dmg
     // a permanent URL, so install.sh and the website never need updating when
     // a new version ships. The release tag still carries the version.
-    artifactName: 'Unreleased-Presence-${os}-${arch}.${ext}',
+    artifactName: 'Aura-${os}-${arch}.${ext}',
     target: [
       { target: 'dmg', arch: ['arm64', 'x64'] },
       // The zip is what auto-update and "just unzip it" users take. Produced by
@@ -103,7 +103,7 @@ module.exports = {
 
   win: {
     icon: 'build/icon-win.ico',
-    artifactName: 'Unreleased-Presence-${os}-${arch}.${ext}',
+    artifactName: 'Aura-${os}-${arch}.${ext}',
     target: [
       { target: 'nsis', arch: ['x64', 'ia32'] },
       { target: 'portable', arch: ['x64'] },
@@ -114,13 +114,13 @@ module.exports = {
     oneClick: true,
     perMachine: false,
     allowToChangeInstallationDirectory: false,
-    shortcutName: 'Unreleased Presence',
+    shortcutName: 'Aura',
   },
 
   linux: {
     icon: 'build',
     category: 'AudioVideo',
-    artifactName: 'Unreleased-Presence-${os}-${arch}.${ext}',
+    artifactName: 'Aura-${os}-${arch}.${ext}',
     target: ['AppImage', 'deb', 'zip'],
     // Required by the deb target — fpm refuses to build a package without a
     // maintainer, which failed the Linux job with

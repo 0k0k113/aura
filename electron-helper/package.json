@@ -1,5 +1,5 @@
 {
-  "name": "unreleasd-presence-helper",
+  "name": "aura-helper",
   "version": "1.0.13",
   "description": "Electron helper for Discord Rich Presence integration",
   "main": "dist/main.js",

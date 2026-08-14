@@ -44,6 +44,27 @@ const TRANSLITERATION_MAP: Record<string, string> = {
   '+': 'plus',
 }
 
+/**
+ * One compiled pattern for the whole map, built once.
+ *
+ * This used to be a loop that called `new RegExp('\\' + char, 'g')` per entry,
+ * per call — seven fresh regex compilations for every slug, and a payload can
+ * ask for up to three slugs. Presence updates arrive on every position tick, so
+ * that ran a few thousand times a minute during playback. Individually cheap,
+ * but it was the largest allocator in the main process and there is no reason
+ * to compile the same seven patterns forever.
+ */
+const TRANSLITERATION_PATTERN = new RegExp(
+  `[${Object.keys(TRANSLITERATION_MAP)
+    .map(char => char.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&'))
+    .join('')}]`,
+  'g',
+)
+
+function transliterate(input: string): string {
+  return input.replace(TRANSLITERATION_PATTERN, char => TRANSLITERATION_MAP[char] ?? char)
+}
+
 const LOG_ENABLED = process.env.UNRL_PRESENCE_LOG === '1'
 let lastLogTime = 0
 const LOG_DEBOUNCE_MS = 5000
@@ -102,10 +123,7 @@ function artistAssetKey(artistName: string | undefined): string {
   if (!cleaned) return FALLBACK_ASSET_KEY
 
   // Apply transliteration for special characters
-  let transliterated = cleaned
-  for (const [char, replacement] of Object.entries(TRANSLITERATION_MAP)) {
-    transliterated = transliterated.replace(new RegExp('\\' + char, 'g'), replacement)
-  }
+  const transliterated = transliterate(cleaned)
 
   // Convert to slug: lowercase, non-alphanumeric → underscore, collapse
   const slug = transliterated
@@ -135,10 +153,7 @@ function isSingleTrack(payload: PresencePayload): boolean {
 function albumAssetSlug(albumName: string | undefined): string {
   if (!albumName) return FALLBACK_ASSET_KEY
 
-  let transliterated = albumName
-  for (const [char, replacement] of Object.entries(TRANSLITERATION_MAP)) {
-    transliterated = transliterated.replace(new RegExp('\\' + char, 'g'), replacement)
-  }
+  const transliterated = transliterate(albumName)
 
   const slug = transliterated
     .toLowerCase()

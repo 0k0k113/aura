@@ -143,7 +143,7 @@ function createWindow(): void {
       // renderer visibility throttling.
     },
     backgroundColor: '#000000',
-    title: 'Unreleased Presence'
+    title: 'Aura'
   })
 
   // Apex and www must both be listed: the site may redirect between them, and a
@@ -153,7 +153,22 @@ function createWindow(): void {
     return origin === withWww ? [origin] : [origin, withWww]
   }).join(' ')
 
-  mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+  // Scoped to the app's own documents.
+  //
+  // This used to be registered with no filter, so it fired for every response
+  // the app ever received — every script, image, XHR, and every audio range
+  // request while a track streamed. Each one pauses the response in the
+  // network service, serializes all its headers into a JS object, IPCs them to
+  // the main process, rebuilds the object, and IPCs back, purely to attach a
+  // CSP that only means anything on an HTML document from our own origin.
+  // Media chunks now bypass the round trip entirely.
+  const cspUrlPatterns = ALLOWED_ORIGINS.flatMap((origin) => {
+    const withWww = origin.replace(/^(https?:\/\/)/, '$1www.')
+    const origins = origin === withWww ? [origin] : [origin, withWww]
+    return origins.map((o) => `${o}/*`)
+  })
+
+  mainWindow.webContents.session.webRequest.onHeadersReceived({ urls: cspUrlPatterns }, (details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
@@ -475,7 +490,7 @@ function setupIPC(): void {
       mainWindow.reload()
 
       new Notification({
-        title: 'Unreleased Presence',
+        title: 'Aura',
         body: 'All app data cleared'
       }).show()
 

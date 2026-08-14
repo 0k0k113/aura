@@ -86,6 +86,17 @@ export class DiscordRPC {
     this.reconnectTimeout = setTimeout(() => {
       this.reconnectTimeout = null
       console.log('[RPC] Attempting to reconnect...')
+      // The library's `connect()` registers `this.once('connected', ...)` and
+      // only removes it on success. Every failed attempt therefore leaves one
+      // behind, permanently, on a client we reuse forever — and this fires
+      // every few seconds for as long as Discord is unreachable, which is the
+      // normal state for someone playing music without Discord open. It trips
+      // the emitter's own leak warning ("Possible AsyncEventEmitter memory
+      // leak detected") inside about two minutes, and when Discord finally
+      // does start, all of the accumulated listeners fire at once — each one
+      // registering another transport close handler, so the next disconnect
+      // is amplified by however long the outage lasted.
+      this.client.removeAllListeners('connected')
       this.login().catch(err => {
         console.warn('[RPC] Reconnect failed:', err?.message || err)
       })
@@ -103,9 +114,14 @@ export class DiscordRPC {
    * Every leftover holds a resolve/reject pair and an RPCError with a captured
    * stack trace, and the map survives reconnects, so a long session that
    * bounces Discord (a restart, a sleep/wake) accumulates them for as long as
-   * the app runs. Small individually; unbounded is the problem, and it is in
-   * the main process, which is where "the whole machine feels slower" comes
-   * from.
+   * the app runs.
+   *
+   * This comment used to claim the leak was why "the whole machine feels
+   * slower". It is not — the app only ever has 0-1 requests outstanding, so
+   * this leaks one or two entries per Discord disconnect, well under a
+   * kilobyte across a long session. Worth fixing as a correctness bug; never
+   * worth believing in as a performance cause. The actual cause was the
+   * renderer being kept awake by `backgroundThrottling: false` (see main.ts).
    *
    * Called after the library has already settled those promises, so removing
    * the entries discards nothing a caller is still waiting on.
@@ -174,7 +190,7 @@ export class DiscordRPC {
       this.activitiesDropped++
       this.lastError =
         'Discord connected but never identified the user, so activities cannot be set. ' +
-        'Restart Discord, then restart Unreleased Presence.'
+        'Restart Discord, then restart Aura.'
       console.error(`[RPC] ${this.lastError}`)
       // Reconnecting is the only thing that can recover this.
       this.connected = false

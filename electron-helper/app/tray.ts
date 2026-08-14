@@ -86,7 +86,7 @@ function loadTrayImage(): Electron.NativeImage {
  *
  * On macOS closing the window does not quit the app — `app.on('activate')`
  * builds a NEW BrowserWindow. A captured reference would still point at the
- * destroyed one, so every tray action ("Open unreleasd.world", "Clear All
+ * destroyed one, so every tray action ("Open unreleased.world", "Clear All
  * Data") silently targeted a window that no longer existed for the rest of
  * the session. Resolving it per click always finds the live window.
  */
@@ -104,7 +104,7 @@ export function createTray(
   }
 
   const tray = new Tray(icon)
-  tray.setToolTip('Unreleased Presence')
+  tray.setToolTip('Aura')
 
   // Presence failing used to be entirely invisible — no window, no devtools,
   // no indicator. The status line below is the one place a user can look.
@@ -128,7 +128,7 @@ export function createTray(
   }
 
   const buildMenu = () => Menu.buildFromTemplate([
-    { label: 'Unreleased Presence', enabled: false },
+    { label: 'Aura', enabled: false },
     { label: describeStatus(), enabled: false },
     {
       label: 'Copy diagnostics',
@@ -143,14 +143,14 @@ export function createTray(
         }
         clipboard.writeText(JSON.stringify(report, null, 2))
         new Notification({
-          title: 'Unreleased Presence',
+          title: 'Aura',
           body: 'Diagnostics copied to the clipboard',
         }).show()
       },
     },
     { type: 'separator' },
     {
-      label: 'Open unreleasd.world',
+      label: 'Open unreleased.world',
       click: () => {
         const window = getWindow()
         if (window && !window.isDestroyed()) {
@@ -166,7 +166,7 @@ export function createTray(
         try {
           if (rpc) rpc.clearActivity()
           new Notification({
-            title: 'Unreleased Presence',
+            title: 'Aura',
             body: 'Presence cache cleared'
           }).show()
         } catch (e) {
@@ -218,7 +218,7 @@ export function createTray(
             window.reload()
 
             new Notification({
-              title: 'Unreleased Presence',
+              title: 'Aura',
               body: 'All app data cleared'
             }).show()
           } catch (error) {
@@ -233,7 +233,7 @@ export function createTray(
 
   lastStatus = describeStatus()
   tray.setContextMenu(buildMenu())
-  tray.setToolTip(`Unreleased Presence — ${lastStatus}`)
+  tray.setToolTip(`Aura — ${lastStatus}`)
 
   // Keep the status line honest — but ONLY redraw when it actually changed.
   //
@@ -260,7 +260,7 @@ export function createTray(
       if (status === lastStatus) return
       lastStatus = status
       tray.setContextMenu(buildMenu())
-      tray.setToolTip(`Unreleased Presence — ${status}`)
+      tray.setToolTip(`Aura — ${status}`)
     } catch {
       clearInterval(statusTimer)
     }

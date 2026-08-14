@@ -230,6 +230,22 @@ jobs:
           # Windows and Linux builds were shipping beside it.
           test -f "$NOTES"
           if gh release view "$TAG" >/dev/null 2>&1; then
+            # Drop assets this build no longer produces.
+            #
+            # Artifact names are deliberately version-less so that
+            # /releases/latest/download/<name> is a permanent URL, and uploads
+            # use --clobber, which only replaces a file of the SAME name. So
+            # renaming a product (or dropping a build target) would leave the
+            # previous names sitting on the release forever — still downloadable,
+            # still linked from anywhere that had not been updated, and silently
+            # serving an old build. Reconciling against what is actually in
+            # artifacts/ is what makes a rename safe.
+            for asset in $(gh release view "$TAG" --json assets --jq '.assets[].name'); do
+              if [ ! -e "artifacts/$asset" ]; then
+                echo "Removing stale asset: $asset"
+                gh release delete-asset "$TAG" "$asset" --yes
+              fi
+            done
             gh release upload "$TAG" artifacts/* --clobber
             gh release edit "$TAG" --title "$TAG" --notes-file "$NOTES"
           else
