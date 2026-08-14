@@ -237,17 +237,19 @@ export function createTray(
 
   // Keep the status line honest — but ONLY redraw when it actually changed.
   //
-  // This used to rebuild unconditionally every five seconds. Menu.buildFromTemplate
-  // constructs a fresh native menu (on macOS an NSMenu and one NSMenuItem per
-  // entry) and setContextMenu hands it to the OS, so a 40-minute listening
-  // session spent ~480 of them — continuously, in the main process, for a menu
-  // nobody had open. Steady native allocation like that shows up as the whole
-  // machine getting slower the longer the app runs, and as the machine feeling
-  // instantly better the moment it quits.
+  // This used to rebuild unconditionally every five seconds, constructing a
+  // fresh native menu (on macOS an NSMenu plus one NSMenuItem per entry) and
+  // handing it to the OS — ~480 times over a 40-minute session, for a menu
+  // nobody had open. Skipping the no-op rebuilds is worth doing on its own.
   //
-  // The status is a handful of states that change perhaps a few times a
-  // session, so the comparison below turns those ~480 rebuilds into roughly
-  // the number of times something genuinely happened.
+  // It is NOT, however, why the app made a MacBook slow, and this comment used
+  // to claim it was. One native menu every five seconds is nowhere near a
+  // thermal load, and the user reproduced the slowdown on a build that already
+  // contained this fix. The real cause was elsewhere: the window was created
+  // with `backgroundThrottling: false` (see main.ts), which kept the renderer
+  // painting and the GPU compositing an invisible surface for the whole
+  // session. Left here as a caution — the fact that a fix is real does not
+  // make it the fix for the symptom you were chasing.
   const statusTimer = setInterval(() => {
     if (tray.isDestroyed()) {
       clearInterval(statusTimer)
