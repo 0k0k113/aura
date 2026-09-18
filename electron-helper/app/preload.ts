@@ -289,7 +289,58 @@ const unrlPresenceAPI = {
       console.error('[Presence] Error pinging:', error)
       return { origin: '', hasDiscord: false }
     }
-  }
+  },
+
+  /**
+   * The Discord builds currently running, for the Privacy section of Settings.
+   *
+   * `supported: false` means this helper predates multi-client support or was
+   * built without a Discord client id — the web app renders nothing rather
+   * than an empty list, so an older desktop app degrades quietly.
+   */
+  listDiscordClients: async (): Promise<{
+    supported: boolean
+    reason?: string
+    clients: Array<{
+      pipeId: number
+      flavor: 'stable' | 'ptb' | 'canary' | 'unknown'
+      label: string
+      connected: boolean
+      ready: boolean
+      username: string | null
+      enabled: boolean
+    }>
+    prefs: Record<string, boolean>
+  }> => {
+    try {
+      if (!isCurrentOriginAllowed()) {
+        return { supported: false, reason: 'origin not allowed', clients: [], prefs: {} }
+      }
+      return await ipcRenderer.invoke('presence:list-clients')
+    } catch (error) {
+      console.error('[Presence] Error listing Discord clients:', error)
+      return { supported: false, reason: 'helper did not respond', clients: [], prefs: {} }
+    }
+  },
+
+  /** Turn presence on or off for one Discord build, on this computer. */
+  setDiscordClientEnabled: async (
+    flavor: string,
+    enabled: boolean,
+  ): Promise<{ ok: boolean; error?: string; clients?: unknown; prefs?: Record<string, boolean> }> => {
+    try {
+      if (!isCurrentOriginAllowed()) {
+        return { ok: false, error: 'origin not allowed' }
+      }
+      if (typeof flavor !== 'string' || typeof enabled !== 'boolean') {
+        return { ok: false, error: 'invalid arguments' }
+      }
+      return await ipcRenderer.invoke('presence:set-client-enabled', flavor, enabled)
+    } catch (error: any) {
+      console.error('[Presence] Error setting Discord client:', error)
+      return { ok: false, error: error?.message || 'helper did not respond' }
+    }
+  },
 }
 
 contextBridge.exposeInMainWorld('unrlPresence', unrlPresenceAPI)

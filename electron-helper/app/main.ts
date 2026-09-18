@@ -21,7 +21,8 @@ function loadEnvironment(): void {
 loadEnvironment()
 
 import { app, BrowserWindow, ipcMain, shell, Notification } from 'electron'
-import { DiscordRPC } from './rpc'
+import { DiscordRpcPool } from './rpcPool'
+import { loadFlavorPrefs, saveFlavorPrefs, isFlavor } from './clientPrefs'
 import { collectResourceMetrics } from './metrics'
 import { createPresenceActivity } from './presence'
 import { createTray } from './tray'
@@ -35,7 +36,7 @@ const START_URL = process.env.ELECTRON_APP_URL || 'https://unreleased.world'
 const ALLOWED_ORIGINS = buildAllowedOrigins(START_URL)
 
 let mainWindow: BrowserWindow | null = null
-let rpc: DiscordRPC | null = null
+let rpc: DiscordRpcPool | null = null
 let lastSeekSeq = -1
 let lastTrackId: string | undefined
 let lastPosition = -1
@@ -467,6 +468,32 @@ function setupIPC(): void {
     }
   })
 
+  // Which Discord builds are running right now, and which of them the listener
+  // has presence switched on for. Read by the Privacy section of Settings.
+  ipcMain.handle('presence:list-clients', () => {
+    if (!rpc) {
+      return {
+        supported: false,
+        reason: 'Rich Presence is not initialized — this build is missing DISCORD_CLIENT_ID',
+        clients: [],
+        prefs: {},
+      }
+    }
+    return { supported: true, clients: rpc.listClients(), prefs: rpc.getPrefs() }
+  })
+
+  ipcMain.handle('presence:set-client-enabled', (_event, rawFlavor: unknown, rawEnabled: unknown) => {
+    if (!rpc) return { ok: false, error: 'Rich Presence is not initialized' }
+    if (!isFlavor(rawFlavor)) return { ok: false, error: 'Unknown Discord client' }
+    if (typeof rawEnabled !== 'boolean') return { ok: false, error: 'Expected a boolean' }
+
+    rpc.setFlavorEnabled(rawFlavor, rawEnabled)
+    // Persist after applying, so a failed write cannot stop the card coming
+    // down — the listener's immediate intent matters more than remembering it.
+    saveFlavorPrefs(rpc.getPrefs())
+    return { ok: true, clients: rpc.listClients(), prefs: rpc.getPrefs() }
+  })
+
   ipcMain.handle('presence:clear-all-data', async () => {
     try {
       if (!mainWindow) {
@@ -534,12 +561,12 @@ function initializeRPC(): void {
   }
 
   try {
-    rpc = new DiscordRPC(clientId)
-    rpc.login().catch(err => {
-      console.warn('[RPC] Failed to initialize Discord RPC:', err)
-    })
+    // One connection per running Discord build, rediscovered on an interval.
+    // See app/rpcPool.ts for why a single connection only ever reached one.
+    rpc = new DiscordRpcPool(clientId, loadFlavorPrefs())
+    rpc.start()
   } catch (error) {
-    console.warn('[RPC] Error creating Discord RPC client:', error)
+    console.warn('[RPC] Error creating Discord RPC pool:', error)
   }
 }
 
