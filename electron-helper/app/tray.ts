@@ -2,7 +2,17 @@
 import { Tray, Menu, BrowserWindow, nativeImage, Notification, clipboard } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs'
-import { DiscordRPC } from './rpc'
+import type { RpcStatus } from './rpc'
+
+/**
+ * What the tray needs from the presence layer. Structural rather than the
+ * concrete class so the tray is indifferent to whether it is handed a single
+ * connection or the multi-client pool.
+ */
+export interface TrayPresence {
+  getStatus(): RpcStatus
+  clearActivity(): void
+}
 import { collectResourceMetrics } from './metrics'
 
 function resolveFirstExisting(paths: string[]): string | null {
@@ -128,7 +138,7 @@ function loadTrayImage(): Electron.NativeImage {
  */
 export function createTray(
   getWindow: () => BrowserWindow | null,
-  rpc: DiscordRPC | null
+  rpc: TrayPresence | null
 ): Tray {
   let icon: Electron.NativeImage
 

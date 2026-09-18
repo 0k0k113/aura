@@ -1,5 +1,88 @@
 import { Client } from '@xhayper/discord-rpc'
 import type { SetActivity } from '@xhayper/discord-rpc'
+import path from 'node:path'
+import fs from 'node:fs'
+
+/**
+ * Which build of Discord a connection landed on.
+ *
+ * Every Discord build listens on the same numbered socket family
+ * (`discord-ipc-0` … `discord-ipc-9`) and claims the lowest one that is free,
+ * so the socket number says nothing about which build answered it — whichever
+ * launched first is simply on 0. The build only becomes knowable once it
+ * replies: the READY frame carries a config block naming the API host it talks
+ * to, and canary and PTB each have their own.
+ */
+export type DiscordFlavor = 'stable' | 'ptb' | 'canary' | 'unknown'
+
+export const FLAVOR_LABELS: Record<DiscordFlavor, string> = {
+  stable: 'Discord',
+  ptb: 'Discord PTB',
+  canary: 'Discord Canary',
+  unknown: 'Discord',
+}
+
+/** Read the build out of a READY frame's `config`, defensively. */
+export function detectFlavor(config: unknown): DiscordFlavor {
+  const c = (config ?? {}) as { api_endpoint?: unknown; environment?: unknown }
+  const endpoint = typeof c.api_endpoint === 'string' ? c.api_endpoint.toLowerCase() : ''
+  const environment = typeof c.environment === 'string' ? c.environment.toLowerCase() : ''
+  const haystack = `${endpoint} ${environment}`
+  // Order matters: every endpoint contains "discord.com", so the qualified
+  // hosts have to be ruled out before falling through to stable.
+  if (haystack.includes('canary')) return 'canary'
+  if (haystack.includes('ptb')) return 'ptb'
+  if (endpoint.includes('discord.com') || environment.includes('production')) return 'stable'
+  return 'unknown'
+}
+
+function tempDir(): string {
+  const { XDG_RUNTIME_DIR, TMPDIR, TMP, TEMP } = process.env
+  const candidate = XDG_RUNTIME_DIR ?? TMPDIR ?? TMP ?? TEMP ?? `${path.sep}tmp`
+  try {
+    return fs.realpathSync(candidate)
+  } catch {
+    return candidate
+  }
+}
+
+/**
+ * A path list pinned to one socket number.
+ *
+ * The library does take a `pipeId`, but it tests it with `if (pipeId)` — so
+ * pipe **0**, the one the first-launched Discord almost always owns, is falsy
+ * and silently turns back into "scan 0 through 9 and take the first that
+ * answers". Pinning the number inside `format()` instead makes every candidate
+ * path this socket regardless of how the id is tested, which is what lets one
+ * connection per Discord build exist at the same time.
+ */
+function pathListForPipe(id: number) {
+  return [
+    { platform: ['win32'] as NodeJS.Platform[], format: () => `\\\\?\\pipe\\discord-ipc-${id}` },
+    { platform: ['darwin', 'linux'] as NodeJS.Platform[], format: () => path.join(tempDir(), `discord-ipc-${id}`) },
+    { platform: ['linux'] as NodeJS.Platform[], format: () => path.join(tempDir(), 'snap.discord', `discord-ipc-${id}`) },
+    {
+      platform: ['linux'] as NodeJS.Platform[],
+      format: () => path.join(tempDir(), 'app', 'com.discordapp.Discord', `discord-ipc-${id}`),
+    },
+  ]
+}
+
+export interface DiscordRPCOptions {
+  /** Pin this connection to one Discord socket. Omitted: let the library scan. */
+  pipeId?: number
+  /**
+   * Reconnect on its own after a drop. The pool sets this false and rediscovers
+   * instead, so that a Discord which has actually quit stops being retried
+   * forever and one which reappears is picked up by the same scan that finds a
+   * newly launched one.
+   */
+  autoReconnect?: boolean
+  /** Called once the build behind this socket is known. */
+  onFlavor?: (flavor: DiscordFlavor) => void
+  /** Called when the connection drops and will not retry itself. */
+  onDropped?: () => void
+}
 
 /** Snapshot of the RPC link, surfaced in the tray and over `presence:ping`. */
 export interface RpcStatus {
@@ -41,13 +124,50 @@ export class DiscordRPC {
   private lastActivityAt: number | null = null
   private lastError: string | null = null
   private readonly clientIdPresent: boolean
+  readonly pipeId: number | undefined
+  private readonly autoReconnect: boolean
+  private readonly onDropped?: () => void
+  private flavor: DiscordFlavor = 'unknown'
 
-  constructor(clientId: string) {
+  constructor(clientId: string, options: DiscordRPCOptions = {}) {
     this.clientIdPresent = Boolean(clientId)
-    this.client = new Client({ clientId })
+    this.pipeId = options.pipeId
+    this.autoReconnect = options.autoReconnect !== false
+    this.onDropped = options.onDropped
+
+    this.client =
+      options.pipeId === undefined
+        ? new Client({ clientId })
+        : new Client({
+            clientId,
+            pipeId: options.pipeId,
+            // See pathListForPipe: the id is baked into every candidate path
+            // because the library's own `pipeId` test drops pipe 0.
+            transport: { pathList: pathListForPipe(options.pipeId) },
+          })
+
+    // The build behind this socket is only knowable from the READY frame, and
+    // the library keeps that frame to itself — it lifts `user` and `cdn_host`
+    // out and emits `connected` with nothing attached. Reading the transport
+    // directly is the only way to see `config`. Additive: the library's own
+    // listener is registered in its constructor and still runs.
+    try {
+      const transport = (this.client as unknown as { transport?: { on?: Function } }).transport
+      if (transport && typeof transport.on === 'function') {
+        transport.on('message', (message: any) => {
+          if (message?.cmd === 'DISPATCH' && message?.evt === 'READY') {
+            this.flavor = detectFlavor(message?.data?.config)
+            options.onFlavor?.(this.flavor)
+          }
+        })
+      }
+    } catch {
+      // A library change that moves or renames `transport` costs us the label
+      // and nothing else; the connection still works and reports 'unknown'.
+    }
 
     this.client.on('ready', () => {
-      console.log('[RPC] Connected to Discord')
+      console.log(`[RPC] Connected to ${this.describe()}`)
       this.connected = true
       this.lastError = null
       if (this.lastActivity) {
@@ -56,11 +176,34 @@ export class DiscordRPC {
     })
 
     this.client.on('disconnected', () => {
-      console.warn('[RPC] Disconnected from Discord — will retry')
       this.connected = false
       this.releasePendingRequests()
-      this.scheduleReconnect()
+      if (this.autoReconnect) {
+        console.warn(`[RPC] Disconnected from ${this.describe()} — will retry`)
+        this.scheduleReconnect()
+      } else {
+        // Pooled: the owner drops this connection and its next scan re-adds
+        // the Discord if it is still there. One rediscovery path, not two.
+        console.warn(`[RPC] Disconnected from ${this.describe()} — releasing`)
+        this.onDropped?.()
+      }
     })
+  }
+
+  /** Human-readable identity for logs: "Discord Canary (pipe 1)". */
+  describe(): string {
+    const label = FLAVOR_LABELS[this.flavor]
+    return this.pipeId === undefined ? label : `${label} (pipe ${this.pipeId})`
+  }
+
+  getFlavor(): DiscordFlavor {
+    return this.flavor
+  }
+
+  /** The Discord account this connection is signed in as, once known. */
+  getUsername(): string | null {
+    const user = this.client.user as unknown as { username?: string } | undefined
+    return typeof user?.username === 'string' ? user.username : null
   }
 
   async login(): Promise<void> {
@@ -79,6 +222,16 @@ export class DiscordRPC {
   }
 
   private scheduleReconnect(): void {
+    // Single choke point for every path that wants to retry — the disconnect
+    // handler, a failed login, and the two error branches in dispatch(). A
+    // pooled connection never retries on its own; it tells its owner to let it
+    // go, so a Discord that has quit stops being polled forever and one that
+    // comes back is found by the same scan that finds a newly launched build.
+    if (!this.autoReconnect) {
+      this.onDropped?.()
+      return
+    }
+
     if (this.reconnectTimeout) {
       return
     }
