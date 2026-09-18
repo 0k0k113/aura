@@ -120,6 +120,30 @@ jobs:
           echo "npm ci failed after 3 attempts"
           exit 1
 
+      # The built app reports package.json's version through app.getVersion(),
+      # which is what the tray and `presence:ping` show and what anyone reporting
+      # a problem will read out. That number is only right if someone remembers
+      # to bump it, and it had drifted to 1.0.18 while the tag people actually
+      # installed said v1.0.4. Deriving it from the tag makes the two the same
+      # thing by construction; the value committed in package.json is then just
+      # the default for local builds.
+      #
+      # After `npm ci`, deliberately: npm refuses to install when package.json
+      # and the lockfile disagree, and this edits only package.json.
+      - name: Stamp the release version
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.version = process.env.VERSION;
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+          echo "Building as $(node -p "require('./package.json').version")"
+
       - name: Build
         shell: bash
         env:
