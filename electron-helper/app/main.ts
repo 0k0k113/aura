@@ -209,18 +209,19 @@ function createWindow(): void {
   const ua = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`
   mainWindow.webContents.setUserAgent(ua)
 
-  // Debug: Range header instrumentation (MEDIA_DEBUG=1)
+  // Debug: Range header instrumentation (MEDIA_DEBUG=1). Audio streams straight
+  // from Vercel Blob, so watch the blob host rather than an app route.
   if (process.env.MEDIA_DEBUG === '1') {
     let lastRangeLog = 0
     const RANGE_LOG_DEBOUNCE_MS = 2000
 
     mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
-      { urls: ['*://*/api/media/*'] },
+      { urls: ['*://*.public.blob.vercel-storage.com/*'] },
       (details, callback) => {
         const now = Date.now()
         if (now - lastRangeLog >= RANGE_LOG_DEBOUNCE_MS) {
           const hasRange = !!details.requestHeaders['Range']
-          console.log('[MediaDebug] Request to /api/media/* - Range header:', hasRange ? 'present' : 'absent')
+          console.log('[MediaDebug] Blob audio request - Range header:', hasRange ? 'present' : 'absent')
           lastRangeLog = now
         }
         callback({ requestHeaders: details.requestHeaders })
