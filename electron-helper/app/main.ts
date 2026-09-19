@@ -210,18 +210,19 @@ function createWindow(): void {
   mainWindow.webContents.setUserAgent(ua)
 
   // Debug: Range header instrumentation (MEDIA_DEBUG=1). Audio streams straight
-  // from Vercel Blob, so watch the blob host rather than an app route.
+  // from its origin — Vercel Blob for the legacy catalogue, the audio CDN zone
+  // for tracks the tracker worker files — so watch both hosts, not an app route.
   if (process.env.MEDIA_DEBUG === '1') {
     let lastRangeLog = 0
     const RANGE_LOG_DEBOUNCE_MS = 2000
 
     mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
-      { urls: ['*://*.public.blob.vercel-storage.com/*'] },
+      { urls: ['*://*.public.blob.vercel-storage.com/*', '*://audio.unreleased.world/*'] },
       (details, callback) => {
         const now = Date.now()
         if (now - lastRangeLog >= RANGE_LOG_DEBOUNCE_MS) {
           const hasRange = !!details.requestHeaders['Range']
-          console.log('[MediaDebug] Blob audio request - Range header:', hasRange ? 'present' : 'absent')
+          console.log('[MediaDebug] Audio request - Range header:', hasRange ? 'present' : 'absent', new URL(details.url).host)
           lastRangeLog = now
         }
         callback({ requestHeaders: details.requestHeaders })
