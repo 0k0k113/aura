@@ -133,7 +133,11 @@ To see Discord Rich Presence working:
 
 1. Make sure **Discord desktop** is running and you are logged in.
 2. Open **Unreleased Presence**.
-3. Log into **unreleased.world** inside the Electron window (if prompted).
+3. Log into **unreleased.world** inside the Electron window (if prompted). Email
+   and password work right there. **Sign in with a passkey**, Google and
+   Discord open your browser (since 1.0.5): sign in there, press **Continue to
+   the app**, allow the browser to open aura, and you're back in the app,
+   signed in.
 4. Start playing a track on **unreleased.world**.
 5. In Discord, open your profile card and confirm you see **Listening to unreleased.world** with track details.
 

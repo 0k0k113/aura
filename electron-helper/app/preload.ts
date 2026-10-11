@@ -345,6 +345,79 @@ const unrlPresenceAPI = {
 
 contextBridge.exposeInMainWorld('unrlPresence', unrlPresenceAPI)
 
+// ---------------------------------------------------------------------------
+// Signing in through the browser (1.0.5+; app/deepLink.ts tells the story).
+//
+// The page (lib/auth/desktopSignIn.ts on the site) subscribes with
+// onHandoff(). When the OS hands the app a sign-in link, main holds the
+// handoff and nudges ('auth:handoff-ready'); this side then TAKES it
+// ('auth:take-handoff'), which main answers once, only for this window's page
+// on an allowed origin. Subscribing takes too, so a link that started the app
+// reaches the page however late it subscribes. The page gets the handoff and
+// the state and nothing else; it redeems them with the verifier it kept.
+// `version` lets the site tell this app from 1.0.4 and older, which have no
+// unrlAuth at all and keep email and password as the only way in.
+// ---------------------------------------------------------------------------
+
+interface AuthHandoff {
+  handoff: string
+  state: string
+}
+
+const handoffListeners = new Set<(link: AuthHandoff) => void>()
+let taking = false
+let takeAgain = false
+
+async function takeHandoff(): Promise<void> {
+  if (handoffListeners.size === 0 || !isCurrentOriginAllowed()) return
+  if (taking) {
+    // A nudge while a take is in flight: take once more after it, so no link waits for the next one.
+    takeAgain = true
+    return
+  }
+  taking = true
+  try {
+    do {
+      takeAgain = false
+      const link = await ipcRenderer.invoke('auth:take-handoff')
+      if (link && typeof link.handoff === 'string' && typeof link.state === 'string') {
+        for (const listener of Array.from(handoffListeners)) {
+          try {
+            listener({ handoff: link.handoff, state: link.state })
+          } catch (error) {
+            console.error('[Auth] A sign-in listener failed:', error)
+          }
+        }
+      }
+    } while (takeAgain)
+  } catch (error) {
+    console.error('[Auth] Could not take the sign-in from the browser:', error)
+  } finally {
+    taking = false
+  }
+}
+
+ipcRenderer.on('auth:handoff-ready', () => {
+  void takeHandoff()
+})
+
+const unrlAuthAPI = {
+  /** 1: onHandoff exists, and this app opens world.unreleased.aura:// sign-in links. */
+  version: 1,
+
+  /** Calls `callback` with each sign-in the browser hands back. Returns the unsubscribe. */
+  onHandoff: (callback: (link: AuthHandoff) => void): (() => void) => {
+    if (typeof callback !== 'function' || !isCurrentOriginAllowed()) return () => {}
+    handoffListeners.add(callback)
+    void takeHandoff()
+    return () => {
+      handoffListeners.delete(callback)
+    }
+  },
+}
+
+contextBridge.exposeInMainWorld('unrlAuth', unrlAuthAPI)
+
 // Kept unconditional: one line at load, and it's the first thing to check when
 // someone reports "presence isn't showing up".
 console.log(
@@ -355,5 +428,6 @@ console.log(
 declare global {
   interface Window {
     unrlPresence: typeof unrlPresenceAPI
+    unrlAuth: typeof unrlAuthAPI
   }
 }

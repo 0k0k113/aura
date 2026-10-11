@@ -28,6 +28,14 @@ import { createPresenceActivity } from './presence'
 import { createTray } from './tray'
 import { buildAllowedOrigins, isOriginAllowed, normalizeOrigin, ORIGINS_ARGV_PREFIX } from './origins'
 import { buildContentSecurityPolicy } from './csp'
+import {
+  DEEP_LINK_SCHEME,
+  HANDOFF_MAX_AGE_MS,
+  findDeepLinkInArgv,
+  parseAuthDeepLink,
+  protocolClientTarget,
+  type AuthHandoff,
+} from './deepLink'
 import { z } from 'zod'
 
 const START_URL = process.env.ELECTRON_APP_URL || 'https://unreleased.world'
@@ -38,6 +46,13 @@ const ALLOWED_ORIGINS = buildAllowedOrigins(START_URL)
 
 let mainWindow: BrowserWindow | null = null
 let rpc: DiscordRpcPool | null = null
+
+// A sign-in the browser handed back (app/deepLink.ts), held until the page
+// takes it through 'auth:take-handoff'. Pull, not push: the link can arrive
+// while the page is still loading (a cold start by the link itself), and a
+// message sent before the page listens would be lost. One at a time; a newer
+// link replaces an older one.
+let pendingHandoff: { link: AuthHandoff; at: number } | null = null
 let lastSeekSeq = -1
 let lastTrackId: string | undefined
 let lastPosition = -1
@@ -101,6 +116,61 @@ const presencePayloadSchema = z.object({
   track_id: z.string().optional(),
   trace_id: z.string().optional()
 })
+
+/** The window to the front (or a new one, if the last was closed on macOS). */
+function bringWindowForward(): void {
+  if (!app.isReady()) return
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow()
+    return
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+/**
+ * A link the OS handed over (open-url, or a command line). Anything that is
+ * not a well-formed sign-in link is ignored, and nothing about it is logged:
+ * until the page redeems it, the handoff in it is a credential.
+ */
+function acceptDeepLink(raw: string | null | undefined): void {
+  if (!raw) return
+  const link = parseAuthDeepLink(raw)
+  if (!link) {
+    console.warn('[DeepLink] Ignored a link that is not an aura sign-in')
+    return
+  }
+  pendingHandoff = { link, at: Date.now() }
+  bringWindowForward()
+  // A page that is already listening takes it now; one still loading takes it when it subscribes.
+  const contents = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null
+  if (contents && !contents.isDestroyed()) contents.send('auth:handoff-ready')
+}
+
+/**
+ * The OS opens sign-in links with this app. electron-builder's `protocols`
+ * declares the scheme for macOS (Info.plist) and Linux (the .desktop file);
+ * Windows learns it here, in the user's registry (HKCU\Software\Classes),
+ * which is also what keeps it pointing at this copy after an update.
+ */
+function registerProtocolClient(): void {
+  try {
+    const target = protocolClientTarget({
+      defaultApp: Boolean(process.defaultApp),
+      appPath: process.defaultApp && process.argv[1] ? path.resolve(process.argv[1]) : null,
+      execPath: process.execPath,
+      portableExecutable: process.env.PORTABLE_EXECUTABLE_FILE || null,
+    })
+    const ok = target.path
+      ? app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME, target.path, target.args ?? [])
+      : app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME)
+    if (!ok) console.warn(`[DeepLink] The OS did not register ${DEEP_LINK_SCHEME}: sign-in links will not open the app`)
+  } catch (error) {
+    // Email and password still work; only the browser's way back is missing.
+    console.warn('[DeepLink] Registering the sign-in scheme failed:', error)
+  }
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -437,6 +507,19 @@ function setupIPC(): void {
     }
   })
 
+  // The page takes the sign-in the browser handed back (app/deepLink.ts), once.
+  // Only the main window's own page, on an allowed origin, and only while the
+  // link is fresh; taking it clears it, so it is delivered exactly once.
+  ipcMain.handle('auth:take-handoff', (event) => {
+    if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return null
+    if (!isOriginAllowed(event.senderFrame?.url, ALLOWED_ORIGINS)) return null
+    const pending = pendingHandoff
+    if (!pending) return null
+    pendingHandoff = null
+    if (Date.now() - pending.at > HANDOFF_MAX_AGE_MS) return null
+    return { handoff: pending.link.handoff, state: pending.link.state }
+  })
+
   ipcMain.handle('presence:ping', () => {
     return {
       // Kept for compatibility with older web builds.
@@ -555,17 +638,31 @@ function initializeRPC(): void {
   }
 }
 
+// macOS hands sign-in links over as Apple Events, to the running app (never a
+// second instance), and to a starting one before 'ready': listen from the top.
+app.on('open-url', (event, url) => {
+  event.preventDefault()
+  acceptDeepLink(url)
+})
+
 const gotTheLock = app.requestSingleInstanceLock()
 
 if (!gotTheLock) {
   app.quit()
 } else {
-  app.on('second-instance', () => {
+  // Windows and Linux start a second copy with the link on its command line;
+  // the lock makes it quit and hands its command line to this one.
+  app.on('second-instance', (_event, argv) => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore()
       mainWindow.focus()
     }
+    acceptDeepLink(findDeepLinkInArgv(argv))
   })
+
+  registerProtocolClient()
+  // Started by a link (the app was not running): it is on this command line.
+  acceptDeepLink(findDeepLinkInArgv(process.argv))
 
   app.whenReady().then(() => {
     createWindow()
