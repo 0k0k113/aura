@@ -54,6 +54,15 @@ module.exports = {
   files: ['dist/**/*', 'build/**/*', 'package.json', '.env'],
   asar: true,
 
+  // The scheme the browser opens to hand a sign-in back to the app (since
+  // 1.0.5; app/deepLink.ts). electron-builder writes it into the macOS
+  // Info.plist (CFBundleURLTypes) and the Linux .desktop file
+  // (MimeType=x-scheme-handler/...); its NSIS installer writes nothing for it,
+  // so on Windows the app registers it itself at every start
+  // (app.setAsDefaultProtocolClient in main.ts), and build/installer.nsh takes
+  // it out again on uninstall.
+  protocols: [{ name: 'aura sign-in', schemes: ['world.unreleased.aura'] }],
+
   // Ad-hoc signs the bundle when no Developer ID is configured. Runs on every
   // macOS pack; no-ops on Windows and Linux.
   afterPack: 'scripts/adhoc-sign.js',
