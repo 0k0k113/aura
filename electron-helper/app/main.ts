@@ -27,6 +27,7 @@ import { collectResourceMetrics } from './metrics'
 import { createPresenceActivity } from './presence'
 import { createTray } from './tray'
 import { buildAllowedOrigins, isOriginAllowed, normalizeOrigin, ORIGINS_ARGV_PREFIX } from './origins'
+import { buildContentSecurityPolicy } from './csp'
 import { z } from 'zod'
 
 const START_URL = process.env.ELECTRON_APP_URL || 'https://unreleased.world'
@@ -147,13 +148,6 @@ function createWindow(): void {
     title: 'aura'
   })
 
-  // Apex and www must both be listed: the site may redirect between them, and a
-  // CSP naming only one would block the other's scripts and styles outright.
-  const cspOrigins = ALLOWED_ORIGINS.flatMap((origin) => {
-    const withWww = origin.replace(/^(https?:\/\/)/, '$1www.')
-    return origin === withWww ? [origin] : [origin, withWww]
-  }).join(' ')
-
   // Registered WITHOUT a filter, deliberately.
   //
   // A previous version passed `{ urls: [...] }` here to skip the round trip for
@@ -174,27 +168,18 @@ function createWindow(): void {
   //
   // The try/catch is the actual lesson: page load must not be reachable from a
   // failure in window setup.
+  //
+  // The policy itself lives in app/csp.ts, where tests/csp.test.js pins it.
+  // It names Cloudflare (script-src and frame-src) since 1.0.5: without that
+  // the site's sign-in check (Turnstile) cannot load here, and Supabase
+  // refuses every email sign-in made in the app.
   try {
+    const contentSecurityPolicy = buildContentSecurityPolicy(ALLOWED_ORIGINS)
     mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
-        'Content-Security-Policy': [
-          `default-src 'self' ${cspOrigins}; ` +
-          `script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: ${cspOrigins}; ` +
-          // Supabase realtime drives its keep-alive ping from a Web Worker
-          // spawned off a blob URL. Without this the construction is refused,
-          // and realtime-js answers a failed worker by disconnecting outright —
-          // so the desktop app loses cross-device control entirely. With the
-          // main-thread fallback it merely loses the ping whenever the window
-          // is backgrounded, which is exactly when playback control matters.
-          `worker-src 'self' blob:; ` +
-          `style-src 'self' 'unsafe-inline' ${cspOrigins}; ` +
-          `img-src 'self' data: https: blob:; ` +
-          `connect-src 'self' https: ws: wss: data:; ` +
-          `font-src 'self' data: ${cspOrigins}; ` +
-          `media-src 'self' https: data: blob:;`
-        ]
+        'Content-Security-Policy': [contentSecurityPolicy]
       }
     })
     })

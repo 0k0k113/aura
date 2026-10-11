@@ -2,6 +2,18 @@ Discord Rich Presence for **unreleased.world**. Install it, leave it running,
 and whatever you play on the site shows up on your Discord profile — cover art,
 track, artist, elapsed time. Nothing shows while you're paused.
 
+## What's new in 1.0.5
+
+**Signing in and creating an account work in the app again.** unreleased.world
+now runs Cloudflare's security check when you sign in, create an account or
+reset your password. Versions 1.0.4 and older block that check, so those steps
+fail inside the app even though they work in a browser. 1.0.5 lets the check
+load. That is the only change.
+
+The app doesn't update itself. Install 1.0.5 over the old version the same way
+you installed it (below); your settings and sign-in are kept. On a Mac, the
+one-line installer always fetches the newest version.
+
 ## macOS — one command, no prompts
 
 ```
