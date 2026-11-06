@@ -20,7 +20,10 @@ interface PresencePayload {
   asset_key?: string
   /** Hover text override that travels with the alias. */
   asset_text?: string
+  /** The song's page: the card's cover and title open it (1.0.7). */
   deep_link?: string
+  /** The artist's page: the card's artist line opens it (1.0.7). */
+  artist_url?: string
   timestamp?: number
   position_ms?: number
   duration_ms?: number
@@ -220,18 +223,26 @@ function getTrackImageKey(payload: PresencePayload): string {
  * path that media.discordapp.net served as an image. So every song shows its
  * own cover, with nothing uploaded anywhere.
  *
- * Only our own hosts, over https: the payload already comes from an allowed
- * origin, and this keeps a page that somehow got through from putting any
- * picture it likes on a member's profile. Discord resolves https links only.
- * 256 characters is the shortest limit any Discord surface documents for an
- * image value; the longest cover link in the catalogue is 168.
+ * Only our own hosts, over https (siteLink): the payload already comes from
+ * an allowed origin, and this keeps a page that somehow got through from
+ * putting any picture it likes on a member's profile. Discord resolves https
+ * links only. The longest cover link in the catalogue is 168 characters.
  */
-const COVER_URL_MAX = 256
-
 export function coverImageUrl(value: string | undefined): string | undefined {
+  return siteLink(value)
+}
+
+/**
+ * 256 characters is the shortest limit any Discord surface documents for an
+ * image or a link (large_image, large_url, details_url, state_url).
+ */
+const SITE_LINK_MAX = 256
+
+/** An https link on unreleased.world or one of its hosts, exactly as sent, or nothing. */
+export function siteLink(value: string | undefined): string | undefined {
   if (typeof value !== 'string') return undefined
   const raw = value.trim()
-  if (!raw || raw.length > COVER_URL_MAX) return undefined
+  if (!raw || raw.length > SITE_LINK_MAX) return undefined
   let url: URL
   try {
     url = new URL(raw)
@@ -242,7 +253,7 @@ export function coverImageUrl(value: string | undefined): string | undefined {
   const host = url.hostname.toLowerCase()
   if (host !== 'unreleased.world' && !host.endsWith('.unreleased.world')) return undefined
   // The link as the site sent it: re-serialising could change its escaping,
-  // and Discord keys its proxy copy on the exact link.
+  // and Discord keys its proxy copy of an image on the exact link.
   return raw
 }
 
@@ -371,6 +382,18 @@ export function createPresenceActivity(
       // No buttons on the now-playing card.
       buttons: undefined,
     }
+
+    // Clicks (1.0.7, owner 2026-11-06): the cover and the song title open the
+    // song on the site, the artist line opens the artist's page. Only from
+    // the PAYLOAD: `merged` would carry the page being browsed, not the song.
+    // A link that is not ours leaves that part of the card unclickable.
+    const songLink = siteLink(payload?.deep_link)
+    if (songLink) {
+      presence.largeImageUrl = songLink
+      presence.detailsUrl = songLink
+    }
+    const artistLink = siteLink(payload?.artist_url)
+    if (artistLink && presence.state) presence.stateUrl = artistLink
 
     // Member list, next to the 🎵 — the one line Discord shows when the card
     // is collapsed. It defaults to the activity NAME, which made everyone

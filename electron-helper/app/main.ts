@@ -107,7 +107,9 @@ const presencePayloadSchema = z.object({
   // that is the whole point of aliases (Discord rejects a lot of real titles).
   asset_key: z.string().max(32).optional(),
   asset_text: z.string().max(128).optional(),
-  deep_link: z.string().optional(),
+  deep_link: z.string().max(300).optional(),
+  // The artist's page, opened from the card's artist line (presence.ts).
+  artist_url: z.string().max(300).optional(),
   timestamp: z.number().optional(),
   position_ms: z.number().optional(),
   duration_ms: z.number().optional(),

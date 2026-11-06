@@ -67,6 +67,7 @@ interface PresencePayload {
   track_image_url?: string
   deepLink?: string
   deep_link?: string
+  artist_url?: string
   timestamp?: number
   position_ms?: number
   positionMs?: number
@@ -106,6 +107,11 @@ function debugLog(message: string, data?: unknown): void {
   console.log(`[RP:Preload] ${message}`, data)
 }
 
+/** An https link of at most 300 characters, or nothing. */
+function httpsOrUndefined(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length <= 300 && value.startsWith('https://') ? value : undefined
+}
+
 function normalizePayload(input: any): any {
   // Accept both camelCase and snake_case, normalize to snake_case for main
   const artist_name = input.artist_name || input.artistName
@@ -122,6 +128,7 @@ function normalizePayload(input: any): any {
   const seek_seq = input.seek_seq !== undefined ? input.seek_seq : input.seekSeq
   const track_id = input.track_id || input.trackId
   const deep_link = input.deep_link || input.deepLink
+  const artist_url = input.artist_url || input.artistUrl
   const trace_id = input.trace_id || input.traceId
   // Alias-resolved Discord asset name + hover text, decided by the web app from
   // the admin-managed alias table.
@@ -173,6 +180,7 @@ function normalizePayload(input: any): any {
     asset_key,
     asset_text,
     deep_link,
+    artist_url,
     timestamp: input.timestamp,
     position_ms,
     duration_ms,
@@ -251,7 +259,9 @@ const unrlPresenceAPI = {
         track_image_url: validatedImageUrl,
         asset_key: sanitizeAssetKey(normalized.asset_key),
         asset_text: truncateString(normalized.asset_text, 128),
-        deep_link: normalized.deep_link,
+        // The card's click-throughs (presence.ts siteLink decides which are used).
+        deep_link: httpsOrUndefined(normalized.deep_link),
+        artist_url: httpsOrUndefined(normalized.artist_url),
         timestamp: typeof normalized.timestamp === 'number' ? normalized.timestamp : undefined,
         position_ms: typeof normalized.position_ms === 'number' ? normalized.position_ms : undefined,
         duration_ms: typeof normalized.duration_ms === 'number' ? normalized.duration_ms : undefined,
