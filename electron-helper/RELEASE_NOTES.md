@@ -2,15 +2,19 @@ Discord Rich Presence for **unreleased.world**. Install it, leave it running,
 and whatever you play on the site shows up on your Discord profile — cover art,
 track, artist, elapsed time. Nothing shows while you're paused.
 
-## What's new in 1.0.6
+## What's new in 1.0.7
 
-**Every song shows its own cover on Discord.** Your Discord profile now shows
-the cover of the exact song you're playing, the same picture you see on the
-site. That includes singles, which used to show the artist's picture, and songs
-whose art never made it onto Discord before. Songs without a cover still show
-the artist's picture or the unreleased.world logo, as they did before.
+**Every song shows its own cover on Discord.** Your Discord profile shows the
+cover of the exact song you're playing, the same picture you see on the site,
+with no more black or missing pictures. That includes singles, which used to
+show the artist's picture. Songs without a cover still show the artist's
+picture or the unreleased.world logo.
 
-The app doesn't update itself. Install 1.0.6 over the old version the same way
+**Click the card to open the song.** On your Discord status, clicking the cover
+or the song title opens the song on unreleased.world, and clicking the artist
+opens their page.
+
+The app doesn't update itself. Install 1.0.7 over the old version the same way
 you installed it (below); your settings and sign-in are kept. On a Mac, the
 one-line installer always fetches the newest version.
 

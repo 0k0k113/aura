@@ -5,13 +5,14 @@
 //     builds nothing at all, which the caller turns into clearActivity()
 //   • the song's own cover link is the art when the site sends one
 //   • otherwise alias-resolved asset keys win over derived ones
+//   • the cover and title open the song, the artist line the artist's page
 //   • single vs album classification (broken while main.ts's zod schema was
 //     silently stripping is_single / album_type / album_tracks_count)
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
 
-const { createPresenceActivity, coverImageUrl } = require('../dist/presence')
+const { createPresenceActivity, coverImageUrl, siteLink } = require('../dist/presence')
 
 const HOME = 'https://unreleased.world/home'
 const FALLBACK = 'unreleasd_logo'
@@ -94,6 +95,48 @@ test('a foreign cover link falls back to the alias, then the derived key', () =>
   assert.equal(aliased.largeImageKey, 'album_wlr_2020')
   const derived = createPresenceActivity(HOME, playing({ album_name: 'Whole Lotta Red', is_single: false }))
   assert.equal(derived.largeImageKey, 'album_whole_lotta_red')
+})
+
+// ---------------------------------------------------------------------------
+// Click-throughs
+// ---------------------------------------------------------------------------
+
+const SONG = 'https://www.unreleased.world/kendricklamar?track=6bbfe2cb-4e52-4e12-950c-2f4c1efbf753'
+const ARTIST = 'https://www.unreleased.world/kendricklamar'
+
+test('the cover and the title open the song; the artist line opens the artist', () => {
+  const activity = createPresenceActivity(HOME, playing({ deep_link: SONG, artist_url: ARTIST }))
+  assert.equal(activity.largeImageUrl, SONG)
+  assert.equal(activity.detailsUrl, SONG)
+  assert.equal(activity.stateUrl, ARTIST)
+})
+
+test('links that are not ours leave the card unclickable', () => {
+  const activity = createPresenceActivity(HOME, playing({
+    deep_link: 'https://example.com/song',
+    artist_url: 'http://www.unreleased.world/kendricklamar',
+  }))
+  assert.equal(activity.largeImageUrl, undefined)
+  assert.equal(activity.detailsUrl, undefined)
+  assert.equal(activity.stateUrl, undefined)
+})
+
+test('the page being browsed never becomes the song link', () => {
+  const activity = createPresenceActivity('https://unreleased.world/artist/someone-else', playing())
+  assert.equal(activity.largeImageUrl, undefined)
+  assert.equal(activity.detailsUrl, undefined)
+})
+
+test('no artist line, no artist link', () => {
+  const activity = createPresenceActivity(HOME, playing({ artist_name: undefined, deep_link: SONG, artist_url: ARTIST }))
+  assert.equal(activity.stateUrl, undefined)
+  assert.equal(activity.detailsUrl, SONG)
+})
+
+test('siteLink takes only https links on our hosts, at most 256 characters', () => {
+  assert.equal(siteLink(SONG), SONG)
+  assert.equal(siteLink(`https://www.unreleased.world/${'a'.repeat(240)}`), undefined)
+  assert.equal(siteLink('https://unreleased.world.evil.com/x'), undefined)
 })
 
 // ---------------------------------------------------------------------------
