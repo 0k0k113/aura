@@ -3,14 +3,15 @@
 // Covers Discord activity construction:
 //   • THE GATE — a card exists only while a track is playing; everything else
 //     builds nothing at all, which the caller turns into clearActivity()
-//   • alias-resolved asset keys win over derived ones
+//   • the song's own cover link is the art when the site sends one
+//   • otherwise alias-resolved asset keys win over derived ones
 //   • single vs album classification (broken while main.ts's zod schema was
 //     silently stripping is_single / album_type / album_tracks_count)
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
 
-const { createPresenceActivity } = require('../dist/presence')
+const { createPresenceActivity, coverImageUrl } = require('../dist/presence')
 
 const HOME = 'https://unreleased.world/home'
 const FALLBACK = 'unreleasd_logo'
@@ -27,6 +28,73 @@ function playing(extra = {}) {
     ...extra,
   }
 }
+
+// ---------------------------------------------------------------------------
+// Cover links
+// ---------------------------------------------------------------------------
+
+const COVER = 'https://audio.unreleased.world/covers/kendrick-lamar/damn.png'
+
+test('the song\'s cover link is the art, ahead of any asset key', () => {
+  const activity = createPresenceActivity(HOME, playing({
+    album_name: 'Whole Lotta Red',
+    is_single: false,
+    asset_key: 'album_wlr_2020',
+    track_image_url: COVER,
+  }))
+  assert.equal(activity.largeImageKey, COVER)
+})
+
+test('a single shows its own cover, not the artist picture', () => {
+  const activity = createPresenceActivity(HOME, playing({ is_single: true, track_image_url: COVER }))
+  assert.equal(activity.largeImageKey, COVER)
+})
+
+test('a cover link keeps its escaping exactly as sent', () => {
+  const legacy = 'https://audio.unreleased.world/legacy/images/images/albums/Pink%20Tape-1764470690066.jpg'
+  assert.equal(coverImageUrl(legacy), legacy)
+  assert.equal(coverImageUrl(`  ${legacy} `), legacy)
+})
+
+test('only https links on our own hosts are used', () => {
+  assert.equal(coverImageUrl('https://unreleased.world/cover.png'), 'https://unreleased.world/cover.png')
+  for (const bad of [
+    'http://audio.unreleased.world/covers/a.png',
+    'https://example.com/a.png',
+    'https://unreleased.world.example.com/a.png',
+    'https://evilunreleased.world/a.png',
+    'https://user:pass@audio.unreleased.world/a.png',
+    'https://audio.unreleased.world:8443/a.png',
+    'javascript:alert(1)',
+    'not a url',
+    '',
+    undefined,
+  ]) {
+    assert.equal(coverImageUrl(bad), undefined, `accepted ${bad}`)
+  }
+})
+
+test('a link too long for Discord falls back to the asset key', () => {
+  const long = `https://audio.unreleased.world/covers/${'a'.repeat(240)}.png`
+  const activity = createPresenceActivity(HOME, playing({
+    album_name: 'Whole Lotta Red',
+    is_single: false,
+    track_image_url: long,
+  }))
+  assert.equal(activity.largeImageKey, 'album_whole_lotta_red')
+})
+
+test('a foreign cover link falls back to the alias, then the derived key', () => {
+  const aliased = createPresenceActivity(HOME, playing({
+    album_name: 'Whole Lotta Red',
+    is_single: false,
+    asset_key: 'album_wlr_2020',
+    track_image_url: 'https://example.com/a.png',
+  }))
+  assert.equal(aliased.largeImageKey, 'album_wlr_2020')
+  const derived = createPresenceActivity(HOME, playing({ album_name: 'Whole Lotta Red', is_single: false }))
+  assert.equal(derived.largeImageKey, 'album_whole_lotta_red')
+})
 
 // ---------------------------------------------------------------------------
 // Alias resolution

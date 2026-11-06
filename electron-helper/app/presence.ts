@@ -206,6 +206,46 @@ function getTrackImageKey(payload: PresencePayload): string {
   return getTrackImageFallback(payload)
 }
 
+/**
+ * The song's own cover, as a link Discord can show in place of an asset key.
+ *
+ * Discord art used to mean an asset uploaded by hand to the developer portal:
+ * 300 at most, named `[a-z0-9_-]`, and refused for many real album titles,
+ * which is why the alias table and the asset ZIP exist. The desktop client
+ * also takes an image LINK in `large_image` over the local pipe this app
+ * uses: it registers the link with its own media proxy and echoes back
+ * `mp:external/<hash>/https/<host>/<path>`. Tried on Discord's desktop client
+ * on 2026-11-06 with covers from audio.unreleased.world (a PNG, a 1.5 MB JPEG
+ * and a legacy path with %20 in it): every one came back as an mp:external
+ * path that media.discordapp.net served as an image. So every song shows its
+ * own cover, with nothing uploaded anywhere.
+ *
+ * Only our own hosts, over https: the payload already comes from an allowed
+ * origin, and this keeps a page that somehow got through from putting any
+ * picture it likes on a member's profile. Discord resolves https links only.
+ * 256 characters is the shortest limit any Discord surface documents for an
+ * image value; the longest cover link in the catalogue is 168.
+ */
+const COVER_URL_MAX = 256
+
+export function coverImageUrl(value: string | undefined): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const raw = value.trim()
+  if (!raw || raw.length > COVER_URL_MAX) return undefined
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return undefined
+  }
+  if (url.protocol !== 'https:' || url.username || url.password || url.port) return undefined
+  const host = url.hostname.toLowerCase()
+  if (host !== 'unreleased.world' && !host.endsWith('.unreleased.world')) return undefined
+  // The link as the site sent it: re-serialising could change its escaping,
+  // and Discord keys its proxy copy on the exact link.
+  return raw
+}
+
 function extractContextFromUrl(url: string): PresencePayload {
   try {
     const parsedUrl = new URL(url)
@@ -298,10 +338,12 @@ export function createPresenceActivity(
       // this applies to — the track title keeps its own casing, and so does
       // "unreleased.world" in the header.
       state: truncate(cleanedArtist?.toLowerCase(), 128),
-      // Resolved against `merged`, not the raw payload: URL-derived context
-      // carries the artist when the caller omitted it, and the ART is allowed
-      // to fall back that way even though the printed name is not.
-      largeImageKey: getTrackImageKey(merged),
+      // The song's own cover when the site sent one (coverImageUrl), as on
+      // the site itself. Otherwise the uploaded asset, resolved against
+      // `merged`, not the raw payload: URL-derived context carries the artist
+      // when the caller omitted it, and the ART is allowed to fall back that
+      // way even though the printed name is not.
+      largeImageKey: coverImageUrl(payload?.track_image_url) ?? getTrackImageKey(merged),
       // Empty, and it has to stay empty.
       //
       // `large_text` is documented as the cover art's hover tooltip, and it is
