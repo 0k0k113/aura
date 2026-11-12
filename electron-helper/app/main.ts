@@ -20,7 +20,7 @@ function loadEnvironment(): void {
 
 loadEnvironment()
 
-import { app, BrowserWindow, ipcMain, shell, Notification } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, Notification, nativeTheme } from 'electron'
 import { DiscordRpcPool } from './rpcPool'
 import { loadFlavorPrefs, saveFlavorPrefs, isFlavor } from './clientPrefs'
 import { collectResourceMetrics } from './metrics'
@@ -175,6 +175,15 @@ function registerProtocolClient(): void {
 }
 
 function createWindow(): void {
+  // Windows (and Linux) drew the window's frame and Electron's default menu bar
+  // (File, Edit, View, Window, Help) in the system's light colours: a white
+  // strip across the top of an all-black app. A dark theme makes Windows draw
+  // the title bar dark; the menu bar is hidden below, its shortcuts (reload,
+  // zoom, full screen) still work. The site has no "system" theme
+  // (enableSystem off), so the page itself does not change. macOS keeps its
+  // own frame, as before.
+  if (process.platform !== 'darwin') nativeTheme.themeSource = 'dark'
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -219,6 +228,8 @@ function createWindow(): void {
     backgroundColor: '#000000',
     title: 'aura'
   })
+
+  if (process.platform !== 'darwin') mainWindow.setMenuBarVisibility(false)
 
   // Registered WITHOUT a filter, deliberately.
   //

@@ -113,10 +113,13 @@ module.exports = {
   win: {
     icon: 'build/icon-win.ico',
     artifactName: 'Aura-${os}-${arch}.${ext}',
-    target: [
-      { target: 'nsis', arch: ['x64', 'ia32'] },
-      { target: 'portable', arch: ['x64'] },
-    ],
+    // The installer only. A 'portable' target used to sit here with the same
+    // artifactName, so it was built second and overwrote Aura-win-x64.exe
+    // and Aura-win.exe: the "installer" every link points at was a portable
+    // copy that runs from wherever it was saved and never replaces the
+    // installed app, so people who "updated" kept opening the old one from
+    // the Start menu. Never give two targets one artifactName.
+    target: [{ target: 'nsis', arch: ['x64', 'ia32'] }],
   },
 
   nsis: {

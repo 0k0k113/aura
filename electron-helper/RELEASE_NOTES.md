@@ -2,7 +2,23 @@ Discord Rich Presence for **unreleased.world**. Install it, leave it running,
 and whatever you play on the site shows up on your Discord profile — cover art,
 track, artist, elapsed time. Nothing shows while you're paused.
 
-## What's new in 1.0.7
+## What's new in 1.0.8
+
+**No more white bar on Windows.** The title bar is dark now, and the white
+File / Edit / View menu strip across the top is gone.
+
+**The Windows download is a real installer again.** Until now
+`Aura-win-x64.exe` was a copy that runs from wherever you saved it and never
+replaces the installed app, so after "updating", the aura in your Start menu
+was still the old one (and the site kept asking you to update). 1.0.8 is the
+proper installer: run it and it replaces the old aura.
+
+**Coming from an older aura on Windows?** After installing 1.0.8, open aura
+from the Start menu or the new desktop shortcut. Delete any old aura `.exe`
+you used to open it from (usually in Downloads or on the desktop), and unpin
+the old one from the taskbar.
+
+## In 1.0.7
 
 **Every song shows its own cover on Discord.** Your Discord profile shows the
 cover of the exact song you're playing, the same picture you see on the site,
@@ -14,7 +30,7 @@ picture or the unreleased.world logo.
 or the song title opens the song on unreleased.world, and clicking the artist
 opens their page.
 
-The app doesn't update itself. Install 1.0.7 over the old version the same way
+The app doesn't update itself. Install 1.0.8 over the old version the same way
 you installed it (below); your settings and sign-in are kept. On a Mac, the
 one-line installer always fetches the newest version.
 
