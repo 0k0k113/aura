@@ -55,7 +55,7 @@ function visibleAlphaRatio(file) {
 }
 
 test('the macOS tray assets exist and are not blank', () => {
-  for (const name of ['trayTemplate.png', 'trayTemplate@2x.png', 'tray.png', 'tray@2x.png']) {
+  for (const name of ['trayColor.png', 'trayColor@2x.png', 'trayTemplate.png', 'trayTemplate@2x.png', 'tray.png', 'tray@2x.png']) {
     const asset = path.join(root, 'build', name)
     assert.ok(fs.existsSync(asset), `missing build/${name}`)
 
@@ -109,4 +109,43 @@ test('the resolver looks inside the asar, one level up from dist', () => {
     /path\.join\(__dirname, '\.\.\/build'\)/,
     "loadTrayImage must try __dirname/../build (app.asar/build) — the only path that exists packaged",
   )
+})
+
+// The menu bar showed an empty outlined circle (11-12, the owner: "pls fix the
+// icon on the top"): the template image is drawn from its alpha alone, so the
+// brand mark (black disc, pink ring) lost both colours. macOS now loads the
+// colour mark first and never as a template; these pin that it is first in
+// every lookup and that its pink ring is really in the file.
+test('macOS loads the colour mark first, and only a *Template file as a template', () => {
+  const src = fs.readFileSync(path.join(root, 'app', 'tray.ts'), 'utf8')
+  for (const dir of ['resBuild', 'asarBuild', 'localBuild']) {
+    const first = src.indexOf(`path.join(${dir}, 'trayColor.png')`)
+    const template = src.indexOf(`path.join(${dir}, 'trayTemplate.png')`)
+    assert.ok(first !== -1 && first < template, `${dir}: trayColor.png must come before trayTemplate.png`)
+  }
+  assert.match(src, /if \(\/Template\(@2x\)\?\\\.png\$\/\.test\(chosen/)
+})
+
+test('the colour mark carries the brand pink', () => {
+  const zlib = require('zlib')
+  const buf = fs.readFileSync(path.join(root, 'build', 'trayColor@2x.png'))
+  const width = buf.readUInt32BE(16)
+  const parts = []
+  for (let i = 8; i < buf.length; ) {
+    const len = buf.readUInt32BE(i)
+    if (buf.toString('ascii', i + 4, i + 8) === 'IDAT') parts.push(buf.subarray(i + 8, i + 8 + len))
+    i += 12 + len
+  }
+  const raw = zlib.inflateSync(Buffer.concat(parts))
+  const stride = width * 4 + 1
+  // Unfiltered rows (filter byte 0), as the drawing script writes them.
+  let pink = 0
+  for (let row = 0; row * stride < raw.length; row++) {
+    assert.strictEqual(raw[row * stride], 0, 'expected unfiltered rows')
+    for (let x = 0; x < width; x++) {
+      const o = row * stride + 1 + x * 4
+      if (raw[o + 3] === 255 && Math.abs(raw[o] - 0xe9) < 8 && Math.abs(raw[o + 1] - 0x81) < 8 && Math.abs(raw[o + 2] - 0xec) < 8) pink++
+    }
+  }
+  assert.ok(pink > width, `only ${pink} brand-pink pixels: the ring is missing`)
 })

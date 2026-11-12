@@ -34,6 +34,7 @@ function loadTrayImage(): Electron.NativeImage {
   const resCandidates =
     process.platform === 'darwin'
       ? [
+          path.join(resBuild, 'trayColor.png'),
           path.join(resBuild, 'trayTemplate.png'),
           path.join(resBuild, 'tray.png'),
           path.join(resBuild, 'icon.png')
@@ -65,6 +66,7 @@ function loadTrayImage(): Electron.NativeImage {
   candidates.push(
     ...(process.platform === 'darwin'
       ? [
+          path.join(asarBuild, 'trayColor.png'),
           path.join(asarBuild, 'trayTemplate.png'),
           path.join(asarBuild, 'tray.png'),
           path.join(asarBuild, 'icon.png'),
@@ -83,6 +85,7 @@ function loadTrayImage(): Electron.NativeImage {
   const devCandidates =
     process.platform === 'darwin'
       ? [
+          path.join(localBuild, 'trayColor.png'),
           path.join(localBuild, 'trayTemplate.png'),
           path.join(localBuild, 'tray.png'),
           path.join(localBuild, 'icon.png')
@@ -115,11 +118,17 @@ function loadTrayImage(): Electron.NativeImage {
     return nativeImage.createEmpty()
   }
 
-  // macOS: template images auto-adapt to light/dark menu bar
+  // macOS: the brand mark in colour (trayColor.png, black disc and pink ring,
+  // with its @2x beside it). It used to be a template image, which macOS draws
+  // from the alpha alone in the menu bar's tint: the mark came out as an empty
+  // outlined circle that read as a placeholder. Only a *Template file is
+  // still drawn as one (the fallback when the colour file is missing).
   if (process.platform === 'darwin') {
-    try {
-      img.setTemplateImage(true)
-    } catch {}
+    if (/Template(@2x)?\.png$/.test(chosen ?? '')) {
+      try {
+        img.setTemplateImage(true)
+      } catch {}
+    }
     return img
   }
 
@@ -138,7 +147,21 @@ function loadTrayImage(): Electron.NativeImage {
  */
 export function createTray(
   getWindow: () => BrowserWindow | null,
-  rpc: TrayPresence | null
+  rpc: TrayPresence | null,
+  /**
+   * Show the window, making a new one when there is none. "Open
+   * unreleased.world" used to only show the existing window, so once it had
+   * been closed (macOS kept the app running in the menu bar) the item did
+   * nothing at all.
+   */
+  openWindow: () => void = () => {
+    const window = getWindow()
+    if (window && !window.isDestroyed()) {
+      if (window.isMinimized()) window.restore()
+      window.show()
+      window.focus()
+    }
+  }
 ): Tray {
   let icon: Electron.NativeImage
 
@@ -197,14 +220,7 @@ export function createTray(
     { type: 'separator' },
     {
       label: 'Open unreleased.world',
-      click: () => {
-        const window = getWindow()
-        if (window && !window.isDestroyed()) {
-          if (window.isMinimized()) window.restore()
-          window.show()
-          window.focus()
-        }
-      }
+      click: () => openWindow()
     },
     {
       label: 'Clear Presence Cache',
@@ -314,15 +330,8 @@ export function createTray(
 
   tray.on('click', () => {
     const window = getWindow()
-    if (window && !window.isDestroyed()) {
-      if (window.isVisible()) {
-        window.hide()
-      } else {
-        if (window.isMinimized()) window.restore()
-        window.show()
-        window.focus()
-      }
-    }
+    if (window && !window.isDestroyed() && window.isVisible()) window.hide()
+    else openWindow()
   })
 
   return tray

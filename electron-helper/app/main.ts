@@ -682,7 +682,15 @@ if (!gotTheLock) {
     initializeRPC()
     setupIPC()
 
-    createTray(() => mainWindow, rpc)
+    createTray(() => mainWindow, rpc, () => {
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        createWindow()
+        return
+      }
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+    })
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
@@ -691,10 +699,13 @@ if (!gotTheLock) {
     })
   })
 
+  // Closing the window quits, on every platform (the owner, 2026-11-12:
+  // "clicking x it actually closes the app"). macOS used to keep the app
+  // alive in the menu bar with no window, where it did nothing: the music
+  // and the presence both live in the window. Quitting also clears the
+  // Discord card (before-quit below) instead of leaving the last song on it.
   app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') {
-      app.quit()
-    }
+    app.quit()
   })
 
   app.on('before-quit', () => {
