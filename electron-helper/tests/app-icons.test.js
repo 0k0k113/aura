@@ -111,9 +111,8 @@ function describe(image) {
   }
 }
 
-/** Every disc icon that ends up in a shipped bundle (Windows, Linux). */
+/** Every disc icon that ends up in a shipped bundle (Linux). */
 const ICON_FILES = [
-  'icon-win.png',
   'icon_16.png',
   'icon_22.png',
   'icon_24.png',
@@ -133,6 +132,7 @@ const ICON_FILES = [
  */
 const DOCK_FILES = [
   'icon-mac.png',
+  'icon-win.png',
   'icon.iconset/icon_512x512@2x.png',
   'icon.iconset/icon_512x512.png',
   'icon.iconset/icon_256x256.png',
@@ -219,8 +219,10 @@ test('the Windows .ico embeds real icons at every declared size', () => {
     const image = decodePngBuffer(buf.subarray(offset, offset + size), `icon-win.ico[${i}]`)
     assert.strictEqual(image.width, declared, `ICO entry ${i}: directory says ${declared}px`)
 
+    // The dock tile since 1.0.11 (scripts/generate-icons.js renderDockIcon):
+    // opaque black, with the ring set inside it.
     const { transparentRatio, accentPixels } = describe(image)
-    assert.ok(transparentRatio > 0.1, `ICO ${declared}px is a filled rectangle`)
+    assert.strictEqual(transparentRatio, 0, `ICO ${declared}px: a tile has no transparent pixels`)
     assert.ok(accentPixels > 0, `ICO ${declared}px has no accent ring`)
     seen.push(declared)
   }
