@@ -2,7 +2,13 @@ Discord Rich Presence for **unreleased.world**. Install it, leave it running,
 and whatever you play on the site shows up on your Discord profile — cover art,
 track, artist, elapsed time. Nothing shows while you're paused.
 
-## What's new in 1.0.9
+## What's new in 1.0.10
+
+**A new app icon on Mac.** The dock icon is now the black tile with the pink
+ring, the same icon as the unreleased.world app you can install from your
+browser. Windows and the menu bar icon are unchanged.
+
+## In 1.0.9
 
 **Closing the window quits aura.** Clicking the X (or the red button on a
 Mac) closes the app for real instead of leaving it running in the
