@@ -111,9 +111,8 @@ function describe(image) {
   }
 }
 
-/** Every icon that ends up in a shipped bundle. */
+/** Every disc icon that ends up in a shipped bundle (Windows, Linux). */
 const ICON_FILES = [
-  'icon-mac.png',
   'icon-win.png',
   'icon_16.png',
   'icon_22.png',
@@ -126,6 +125,42 @@ const ICON_FILES = [
   'icon_512.png',
   'icon_1024.png',
 ]
+
+/**
+ * The macOS app icon (dock, Finder, DMG) is the other picture on purpose: an
+ * OPAQUE black tile with the ring set inside it, as the site's installed-app
+ * icon (the owner, 2026-11-14; scripts/generate-icons.js renderDockIcon).
+ */
+const DOCK_FILES = [
+  'icon-mac.png',
+  'icon.iconset/icon_512x512@2x.png',
+  'icon.iconset/icon_512x512.png',
+  'icon.iconset/icon_256x256.png',
+  'icon.iconset/icon_128x128.png',
+  'icon.iconset/icon_32x32@2x.png',
+]
+
+test('the macOS dock icon is an opaque black tile with the ring inset', () => {
+  for (const name of DOCK_FILES) {
+    const file = path.join(build, name)
+    assert.ok(fs.existsSync(file), `missing build/${name}`)
+    const image = decodePng(file)
+    const { transparentRatio, accentPixels, darkRatio } = describe(image)
+    assert.strictEqual(transparentRatio, 0, `build/${name}: a dock tile has no transparent pixels`)
+    assert.ok(accentPixels > 0, `build/${name}: no accent-coloured pixels — the ring is missing`)
+    assert.ok(darkRatio > 0.8, `build/${name}: only ${(darkRatio * 100).toFixed(1)}% black tile`)
+    // The ring is inset: nothing pink within 8% of any edge.
+    const { width, height, pixels } = image
+    const margin = Math.floor(width * 0.08)
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        if (x >= margin && x < width - margin && y >= margin && y < height - margin) continue
+        const o = (y * width + x) * 4
+        assert.ok(!near(pixels, o, ACCENT), `build/${name}: the ring touches the edge at ${x},${y}`)
+      }
+    }
+  }
+})
 
 test('every app icon is a disc, not a filled rectangle', () => {
   for (const name of ICON_FILES) {
@@ -197,7 +232,7 @@ test('the generator reproduces the committed icons byte for byte', () => {
   // If this fails, the icons were hand-edited and the next run of
   // scripts/generate-icons.js will silently revert them.
   const before = Object.fromEntries(
-    ICON_FILES.concat('icon-win.ico').map((n) => [n, fs.readFileSync(path.join(build, n))]),
+    ICON_FILES.concat(DOCK_FILES, 'icon-win.ico').map((n) => [n, fs.readFileSync(path.join(build, n))]),
   )
 
   // Rendered into a temp directory, not over build/ — a test that rewrites the

@@ -97,6 +97,48 @@ function renderIcon(size) {
   return px
 }
 
+/**
+ * The macOS app icon (the dock, Finder, the DMG): an opaque black tile with
+ * the ring set inside it, the mark at DOCK_SCALE of its full size. The same
+ * picture as the site's own installed-app icon (v2 public/icon-maskable-512.png,
+ * which is this mark at 80% on opaque black), so the dock shows Aura as the
+ * owner's browser-installed unreleased.world app shows it (the owner,
+ * 2026-11-14). The black disc inside the ring is the tile's own black.
+ * Windows, Linux and the menu bar keep the full-size disc.
+ */
+const DOCK_SCALE = 0.8
+
+function renderDockIcon(size) {
+  const cx = size / 2
+  const cy = size / 2
+  const rOuter = (size * DISC_RATIO * DOCK_SCALE) / 2
+  const ring = Math.max(1, size * RING_RATIO * DOCK_SCALE)
+  const rInner = Math.max(0, rOuter - ring)
+
+  const px = Buffer.alloc(size * size * 4)
+  const step = 1 / SS
+  const offset = step / 2
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      // Coverage of the ring over the black tile; the tile itself is opaque.
+      let hit = 0
+      for (let sy = 0; sy < SS; sy++) {
+        for (let sx = 0; sx < SS; sx++) {
+          const d = Math.hypot(x + offset + sx * step - cx, y + offset + sy * step - cy)
+          if (d <= rOuter && d >= rInner) hit++
+        }
+      }
+      const k = hit / (SS * SS)
+      const o = (y * size + x) * 4
+      px[o] = Math.round(FILL_RGB[0] + (RING_RGB[0] - FILL_RGB[0]) * k)
+      px[o + 1] = Math.round(FILL_RGB[1] + (RING_RGB[1] - FILL_RGB[1]) * k)
+      px[o + 2] = Math.round(FILL_RGB[2] + (RING_RGB[2] - FILL_RGB[2]) * k)
+      px[o + 3] = 255
+    }
+  }
+  return px
+}
+
 function crc32(buf) {
   let c = ~0
   for (let i = 0; i < buf.length; i++) {
@@ -171,7 +213,7 @@ function encodeIco(entries) {
 const LINUX_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512, 1024]
 /** Windows: what goes inside icon-win.ico. */
 const ICO_SIZES = [16, 32, 64, 128, 256]
-/** macOS iconset, kept in step even though electron-builder builds its own. */
+/** macOS iconset (the dock tile), kept in step even though electron-builder builds its own from icon-mac.png. */
 const ICONSET = [
   ['icon_16x16.png', 16],
   ['icon_16x16@2x.png', 32],
@@ -190,6 +232,11 @@ const png = (size) => {
   if (!cache.has(size)) cache.set(size, encodePng(size, renderIcon(size)))
   return cache.get(size)
 }
+const dockCache = new Map()
+const dockPng = (size) => {
+  if (!dockCache.has(size)) dockCache.set(size, encodePng(size, renderDockIcon(size)))
+  return dockCache.get(size)
+}
 
 const written = []
 const write = (relative, buf) => {
@@ -200,9 +247,9 @@ const write = (relative, buf) => {
 }
 
 for (const size of LINUX_SIZES) write(`icon_${size}.png`, png(size))
-write('icon-mac.png', png(1024))
+write('icon-mac.png', dockPng(1024))
 write('icon-win.png', png(512))
 write('icon-win.ico', encodeIco(ICO_SIZES.map((size) => ({ size, png: png(size) }))))
-for (const [name, size] of ICONSET) write(path.join('icon.iconset', name), png(size))
+for (const [name, size] of ICONSET) write(path.join('icon.iconset', name), dockPng(size))
 
 console.log(`Wrote ${written.length} icons to build/:\n  ${written.join('\n  ')}`)
