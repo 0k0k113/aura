@@ -104,7 +104,8 @@ function renderIcon(size) {
  * which is this mark at 80% on opaque black), so the dock shows Aura as the
  * owner's browser-installed unreleased.world app shows it (the owner,
  * 2026-11-14). The black disc inside the ring is the tile's own black.
- * Windows, Linux and the menu bar keep the full-size disc.
+ * Windows takes it too (icon-win.png, icon-win.ico); Linux and the menu bar
+ * keep the full-size disc.
  */
 const DOCK_SCALE = 0.8
 
@@ -248,8 +249,10 @@ const write = (relative, buf) => {
 
 for (const size of LINUX_SIZES) write(`icon_${size}.png`, png(size))
 write('icon-mac.png', dockPng(1024))
-write('icon-win.png', png(512))
-write('icon-win.ico', encodeIco(ICO_SIZES.map((size) => ({ size, png: png(size) }))))
+// Windows takes the dock tile too (the owner, 2026-11-14: the new icon "is the
+// same for mac & windows"): the taskbar, Start menu, installer and shortcut.
+write('icon-win.png', dockPng(512))
+write('icon-win.ico', encodeIco(ICO_SIZES.map((size) => ({ size, png: dockPng(size) }))))
 for (const [name, size] of ICONSET) write(path.join('icon.iconset', name), dockPng(size))
 
 console.log(`Wrote ${written.length} icons to build/:\n  ${written.join('\n  ')}`)

@@ -2,7 +2,12 @@ Discord Rich Presence for **unreleased.world**. Install it, leave it running,
 and whatever you play on the site shows up on your Discord profile — cover art,
 track, artist, elapsed time. Nothing shows while you're paused.
 
-## What's new in 1.0.10
+## What's new in 1.0.11
+
+**The same new icon on Windows.** The taskbar, Start menu, desktop shortcut
+and installer now show the black tile with the pink ring, like the Mac dock.
+
+## In 1.0.10
 
 **A new app icon on Mac.** The dock icon is now the black tile with the pink
 ring, the same icon as the unreleased.world app you can install from your
