@@ -90,10 +90,17 @@ export interface TitleBarMemory {
   at?: string
 }
 
-/** The traffic lights' position: their frames vertically centred on the band. */
+/**
+ * How far below its frame's centre macOS draws the lights' circles, in points. Measured on the owner's Mac
+ * (2026-11-18, 1.0.13 test build): with the frame centred (y 32) the circles' centre sat 3 pt under the full
+ * player's capsule, which is centred on the band at 40 ("the new native buttons ... are a bit too low").
+ */
+export const TRAFFIC_LIGHT_OPTICAL_OFFSET = 3
+
+/** The traffic lights' position: their circles (not just their frames) vertically centred on the band. */
 export const TRAFFIC_LIGHT_POSITION = Object.freeze({
   x: TRAFFIC_LIGHT_X,
-  y: Math.round((TITLE_BAR_HEIGHT - TRAFFIC_LIGHT_FRAME_HEIGHT) / 2),
+  y: Math.round((TITLE_BAR_HEIGHT - TRAFFIC_LIGHT_FRAME_HEIGHT) / 2) - TRAFFIC_LIGHT_OPTICAL_OFFSET,
 })
 
 /**

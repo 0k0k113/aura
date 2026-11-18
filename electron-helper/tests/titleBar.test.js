@@ -20,6 +20,7 @@ const {
   TITLE_BAR_PROTOCOL,
   TITLE_BAR_HEIGHT,
   TRAFFIC_LIGHT_POSITION,
+  TRAFFIC_LIGHT_OPTICAL_OFFSET,
   READY_GRACE_MS,
   EMERGENCY_CSS,
   titleBarModeFor,
@@ -51,12 +52,13 @@ test('Windows with the overlay: no title bar, the system buttons drawn over the 
 
 test('a Mac with the overlay: hidden title bar, the traffic lights vertically centred on the band, its geometry on', () => {
   const options = titleBarWindowOptions('darwin', 'overlay')
-  assert.deepEqual(options, { titleBarStyle: 'hidden', trafficLightPosition: { x: 24, y: 32 }, titleBarOverlay: { height: 80 } })
-  // A light's frame is 16 tall: 32 + 16/2 = 40, the band's middle.
-  assert.equal(TRAFFIC_LIGHT_POSITION.y + 16 / 2, TITLE_BAR_HEIGHT / 2)
+  assert.deepEqual(options, { titleBarStyle: 'hidden', trafficLightPosition: { x: 24, y: 29 }, titleBarOverlay: { height: 80 } })
+  // A light's frame is 16 tall and macOS draws the circle 3 pt below the frame's middle (measured on the owner's
+  // Mac, 2026-11-18): 29 + 16/2 + 3 = 40, the band's middle, where the full player's capsule is centred.
+  assert.equal(TRAFFIC_LIGHT_POSITION.y + 16 / 2 + TRAFFIC_LIGHT_OPTICAL_OFFSET, TITLE_BAR_HEIGHT / 2)
   // Never shared: a caller changing its copy cannot move the lights of the next window.
   options.trafficLightPosition.y = 0
-  assert.equal(titleBarWindowOptions('darwin', 'overlay').trafficLightPosition.y, 32)
+  assert.equal(titleBarWindowOptions('darwin', 'overlay').trafficLightPosition.y, 29)
 })
 
 test("while the page loads: black, as always, except a light-theme overlay window (its ink buttons stay visible)", () => {
