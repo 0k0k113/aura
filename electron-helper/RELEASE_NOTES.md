@@ -2,7 +2,14 @@ Discord Rich Presence for **unreleased.world**. Install it, leave it running,
 and whatever you play on the site shows up on your Discord profile — cover art,
 track, artist, elapsed time. Nothing shows while you're paused.
 
-## What's new in 1.0.12
+## What's new in 1.0.13
+
+**No more separate title bar.** On Windows, minimize, maximize and close now
+sit in unreleased.world's own top bar, at the top right, the way Spotify does
+it; on a Mac the red, yellow and green buttons sit at the top left of the
+site. Drag the top of the window to move it, and double-click it to maximize.
+The first time you open aura after updating it still has its old title bar;
+from the next time you open it, the new one.
 
 **Esc gets you out of full screen.** If aura went full screen (F11, or a
 video's full-screen button), press Esc to get your window back. F11 still

@@ -30,6 +30,19 @@ import { buildAllowedOrigins, isOriginAllowed, normalizeOrigin, ORIGINS_ARGV_PRE
 import { buildContentSecurityPolicy } from './csp'
 import { attachFullScreenExit, type FullScreenExit } from './fullscreen'
 import {
+  MEMORY_FILE as TITLE_BAR_MEMORY_FILE,
+  TITLE_BAR_ARGV_PREFIX,
+  TITLE_BAR_CHANGED,
+  attachTitleBar,
+  readTitleBarMemory,
+  titleBarModeFor,
+  titleBarWindowOptions,
+  windowBackground,
+  writeTitleBarMemory,
+  type TitleBar,
+  type TitleBarMode,
+} from './titleBar'
+import {
   DEEP_LINK_SCHEME,
   HANDOFF_MAX_AGE_MS,
   findDeepLinkInArgv,
@@ -48,6 +61,8 @@ const ALLOWED_ORIGINS = buildAllowedOrigins(START_URL)
 let mainWindow: BrowserWindow | null = null
 // Esc's way out of full screen for the current window (app/fullscreen.ts).
 let fullScreenExit: FullScreenExit | null = null
+// The window's buttons in the site's top bar, for the current window (app/titleBar.ts).
+let titleBar: TitleBar | null = null
 let rpc: DiscordRpcPool | null = null
 
 // A sign-in the browser handed back (app/deepLink.ts), held until the page
@@ -188,11 +203,29 @@ function createWindow(): void {
   // own frame, as before.
   if (process.platform !== 'darwin') nativeTheme.themeSource = 'dark'
 
-  mainWindow = new BrowserWindow({
+  // The window's buttons in the site's own top bar (app/titleBar.ts): on
+  // Windows and macOS, once the site has said it is ready for that (it said so
+  // in an earlier start, remembered in userData). Until then, and on Linux,
+  // the frame exactly as before. Anything going wrong here means the frame.
+  const titleBarMemoryFile = path.join(app.getPath('userData'), TITLE_BAR_MEMORY_FILE)
+  const titleBarRemembered = readTitleBarMemory(titleBarMemoryFile, fs)
+  let titleBarMode: TitleBarMode = 'frame'
+  let titleBarOptions: ReturnType<typeof titleBarWindowOptions> = {}
+  try {
+    titleBarMode = titleBarModeFor(process.platform, titleBarRemembered)
+    titleBarOptions = titleBarWindowOptions(process.platform, titleBarMode, titleBarRemembered?.theme)
+  } catch (error) {
+    console.error('[Main] Could not decide the title bar; keeping the frame:', error)
+    titleBarMode = 'frame'
+    titleBarOptions = {}
+  }
+
+  const makeWindow = (mode: TitleBarMode, extra: ReturnType<typeof titleBarWindowOptions>) => new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 800,
     minHeight: 600,
+    ...extra,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -200,8 +233,9 @@ function createWindow(): void {
       sandbox: true,
       // The sandboxed preload cannot import ./origins (its `require` is a
       // polyfill limited to a few Electron built-ins), so the allow-list
-      // travels as a process argument. One list, one owner, no drift.
-      additionalArguments: [ORIGINS_ARGV_PREFIX + JSON.stringify(ALLOWED_ORIGINS)],
+      // travels as a process argument. One list, one owner, no drift. The
+      // title bar's mode travels the same way (app/titleBar.ts).
+      additionalArguments: [ORIGINS_ARGV_PREFIX + JSON.stringify(ALLOWED_ORIGINS), TITLE_BAR_ARGV_PREFIX + mode],
       webSecurity: true,
       autoplayPolicy: 'no-user-gesture-required' as any,
       // Deliberately left at Chromium's default (throttling ENABLED).
@@ -229,9 +263,20 @@ function createWindow(): void {
       // powerSaveBlocker('prevent-app-suspension'), which does not disable
       // renderer visibility throttling.
     },
-    backgroundColor: '#000000',
+    backgroundColor: windowBackground(mode, titleBarRemembered?.theme),
     title: 'aura'
   })
+
+  // A window with the overlay that cannot be made is made with the frame: never no window at all.
+  try {
+    mainWindow = makeWindow(titleBarMode, titleBarOptions)
+  } catch (error) {
+    if (titleBarMode === 'frame') throw error
+    console.error('[Main] Could not make the window with its buttons over the page; using the frame:', error)
+    titleBarMode = 'frame'
+    titleBarOptions = {}
+    mainWindow = makeWindow(titleBarMode, titleBarOptions)
+  }
 
   if (process.platform !== 'darwin') mainWindow.setMenuBarVisibility(false)
 
@@ -243,6 +288,30 @@ function createWindow(): void {
     fullScreenExit = attachFullScreenExit(mainWindow)
   } catch (error) {
     console.error('[Main] Failed to wire the way out of full screen; continuing without it:', error)
+  }
+
+  // The site's word that it is ready for the overlay, its colours, and the
+  // safe band for a page that never says it (app/titleBar.ts). In a try, like
+  // the two around it: window setup must never stop the page from loading.
+  try {
+    titleBar = attachTitleBar(mainWindow, {
+      platform: process.platform,
+      mode: titleBarMode,
+      remembered: titleBarRemembered,
+      isSiteUrl: (url) => isOriginAllowed(url, ALLOWED_ORIGINS),
+      remember: (siteReady, theme) => {
+        writeTitleBarMemory(titleBarMemoryFile, siteReady, theme, fs)
+      },
+    })
+    // The page's first look at the window's state (a reload of a maximized window, say).
+    const contents = mainWindow.webContents
+    const window = mainWindow
+    contents.on('did-finish-load', () => {
+      if (titleBarMode !== 'overlay' || window.isDestroyed() || contents.isDestroyed()) return
+      contents.send(TITLE_BAR_CHANGED, { maximized: window.isMaximized(), fullScreen: window.isFullScreen() })
+    })
+  } catch (error) {
+    console.error('[Main] Failed to wire the title bar; continuing without it:', error)
   }
 
   // Registered WITHOUT a filter, deliberately.
@@ -330,6 +399,7 @@ function createWindow(): void {
   mainWindow.on('closed', () => {
     mainWindow = null
     fullScreenExit = null
+    titleBar = null
   })
 
   mainWindow.loadURL(START_URL).catch(err => {
@@ -561,6 +631,16 @@ function setupIPC(): void {
     if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return false
     if (!isOriginAllowed(event.senderFrame?.url, ALLOWED_ORIGINS)) return false
     return fullScreenExit ? fullScreenExit.leave() : false
+  })
+
+  // The window's buttons (app/titleBar.ts): the colours under them, 'dark' or
+  // 'light', and the site's word that it is ready for the overlay. Only the
+  // main window's own page, on an allowed origin; only those two words and the
+  // protocol this app speaks. Anything else gets false and changes nothing.
+  ipcMain.handle('window:title-bar-theme', (event, theme: unknown, protocol: unknown) => {
+    if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return false
+    if (!isOriginAllowed(event.senderFrame?.url, ALLOWED_ORIGINS)) return false
+    return titleBar ? titleBar.setTheme(theme, protocol) : false
   })
 
   ipcMain.handle('presence:ping', () => {

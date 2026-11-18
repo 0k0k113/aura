@@ -239,12 +239,12 @@ function loadPreload(origin) {
   return { api: exposed.unrlWindow, exposed, invoked, answers, fromMain, restore }
 }
 
-test('the preload exposes unrlWindow with exactly four things, next to the bridges it had', () => {
+test('the preload exposes unrlWindow with the full-screen trio, next to the bridges it had (1.0.13 adds the title bar: tests/titleBar.test.js)', () => {
   const p = loadPreload('https://unreleased.world')
   try {
     assert.deepEqual(Object.keys(p.exposed).sort(), ['unrlAuth', 'unrlPresence', 'unrlWindow'])
-    assert.deepEqual(Object.keys(p.api).sort(), ['exitFullScreen', 'isFullScreen', 'onFullScreenChange', 'version'])
-    assert.equal(p.api.version, 1)
+    for (const key of ['exitFullScreen', 'isFullScreen', 'onFullScreenChange', 'version']) assert.ok(key in p.api, key)
+    assert.equal(p.api.version, 2)
   } finally {
     p.restore()
   }
