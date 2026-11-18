@@ -2,7 +2,14 @@ Discord Rich Presence for **unreleased.world**. Install it, leave it running,
 and whatever you play on the site shows up on your Discord profile — cover art,
 track, artist, elapsed time. Nothing shows while you're paused.
 
-## What's new in 1.0.11
+## What's new in 1.0.12
+
+**Esc gets you out of full screen.** If aura went full screen (F11, or a
+video's full-screen button), press Esc to get your window back. F11 still
+works too, and unreleased.world now shows an "Exit full screen" button at the
+top while aura is full screen.
+
+## In 1.0.11
 
 **The same new icon on Windows.** The taskbar, Start menu, desktop shortcut
 and installer now show the black tile with the pink ring, like the Mac dock.

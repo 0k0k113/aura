@@ -428,6 +428,70 @@ const unrlAuthAPI = {
 
 contextBridge.exposeInMainWorld('unrlAuth', unrlAuthAPI)
 
+// ---------------------------------------------------------------------------
+// Full screen (1.0.12+; app/fullscreen.ts tells the story).
+//
+// A full-screen window has no title bar on Windows, so the site draws its own
+// "Exit full screen" button while the window is in full screen. The page asks
+// whether it is (isFullScreen), hears each change (onFullScreenChange: main
+// sends 'window:full-screen-changed' as the window enters and leaves full
+// screen, F11's or a video's), and asks to leave (exitFullScreen). Only on an
+// allowed origin, and main answers only the main window's own page; nothing
+// else about the window is exposed. `version` tells this app from 1.0.11 and
+// older, which have no unrlWindow (there, only F11 leaves F11's full screen).
+// ---------------------------------------------------------------------------
+
+const fullScreenListeners = new Set<(fullScreen: boolean) => void>()
+
+ipcRenderer.on('window:full-screen-changed', (_event, value: unknown) => {
+  if (typeof value !== 'boolean' || !isCurrentOriginAllowed()) return
+  for (const listener of Array.from(fullScreenListeners)) {
+    try {
+      listener(value)
+    } catch (error) {
+      console.error('[Window] A full-screen listener failed:', error)
+    }
+  }
+})
+
+const unrlWindowAPI = {
+  /** 1: isFullScreen, onFullScreenChange and exitFullScreen exist, and Esc leaves full screen. */
+  version: 1,
+
+  /** Whether the window is full screen now; false when this page may not ask. */
+  isFullScreen: async (): Promise<boolean> => {
+    try {
+      if (!isCurrentOriginAllowed()) return false
+      return (await ipcRenderer.invoke('window:is-full-screen')) === true
+    } catch (error) {
+      console.error('[Window] Could not tell whether the window is full screen:', error)
+      return false
+    }
+  },
+
+  /** Calls `callback` with true or false each time the window enters or leaves full screen. Returns the unsubscribe. */
+  onFullScreenChange: (callback: (fullScreen: boolean) => void): (() => void) => {
+    if (typeof callback !== 'function' || !isCurrentOriginAllowed()) return () => {}
+    fullScreenListeners.add(callback)
+    return () => {
+      fullScreenListeners.delete(callback)
+    }
+  },
+
+  /** Leaves full screen (F11's or a video's). True when the window was full screen. */
+  exitFullScreen: async (): Promise<boolean> => {
+    try {
+      if (!isCurrentOriginAllowed()) return false
+      return (await ipcRenderer.invoke('window:exit-full-screen')) === true
+    } catch (error) {
+      console.error('[Window] Could not leave full screen:', error)
+      return false
+    }
+  },
+}
+
+contextBridge.exposeInMainWorld('unrlWindow', unrlWindowAPI)
+
 // Kept unconditional: one line at load, and it's the first thing to check when
 // someone reports "presence isn't showing up".
 console.log(
@@ -439,5 +503,6 @@ declare global {
   interface Window {
     unrlPresence: typeof unrlPresenceAPI
     unrlAuth: typeof unrlAuthAPI
+    unrlWindow: typeof unrlWindowAPI
   }
 }

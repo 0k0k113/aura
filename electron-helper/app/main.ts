@@ -28,6 +28,7 @@ import { createPresenceActivity } from './presence'
 import { createTray } from './tray'
 import { buildAllowedOrigins, isOriginAllowed, normalizeOrigin, ORIGINS_ARGV_PREFIX } from './origins'
 import { buildContentSecurityPolicy } from './csp'
+import { attachFullScreenExit, type FullScreenExit } from './fullscreen'
 import {
   DEEP_LINK_SCHEME,
   HANDOFF_MAX_AGE_MS,
@@ -45,6 +46,8 @@ const START_URL = process.env.ELECTRON_APP_URL || 'https://unreleased.world'
 const ALLOWED_ORIGINS = buildAllowedOrigins(START_URL)
 
 let mainWindow: BrowserWindow | null = null
+// Esc's way out of full screen for the current window (app/fullscreen.ts).
+let fullScreenExit: FullScreenExit | null = null
 let rpc: DiscordRpcPool | null = null
 
 // A sign-in the browser handed back (app/deepLink.ts), held until the page
@@ -179,7 +182,8 @@ function createWindow(): void {
   // (File, Edit, View, Window, Help) in the system's light colours: a white
   // strip across the top of an all-black app. A dark theme makes Windows draw
   // the title bar dark; the menu bar is hidden below, its shortcuts (reload,
-  // zoom, full screen) still work. The site has no "system" theme
+  // zoom, full screen: F11) still work, and Esc leaves full screen too
+  // (app/fullscreen.ts). The site has no "system" theme
   // (enableSystem off), so the page itself does not change. macOS keeps its
   // own frame, as before.
   if (process.platform !== 'darwin') nativeTheme.themeSource = 'dark'
@@ -230,6 +234,16 @@ function createWindow(): void {
   })
 
   if (process.platform !== 'darwin') mainWindow.setMenuBarVisibility(false)
+
+  // Full screen has no title bar on Windows, so nothing on screen led back out
+  // of it (app/fullscreen.ts): Esc leaves it now, and the page hears when the
+  // window enters and leaves it, to draw its own way out. In a try, like the
+  // CSP below: window setup must never stop the page from loading.
+  try {
+    fullScreenExit = attachFullScreenExit(mainWindow)
+  } catch (error) {
+    console.error('[Main] Failed to wire the way out of full screen; continuing without it:', error)
+  }
 
   // Registered WITHOUT a filter, deliberately.
   //
@@ -315,6 +329,7 @@ function createWindow(): void {
 
   mainWindow.on('closed', () => {
     mainWindow = null
+    fullScreenExit = null
   })
 
   mainWindow.loadURL(START_URL).catch(err => {
@@ -531,6 +546,21 @@ function setupIPC(): void {
     pendingHandoff = null
     if (Date.now() - pending.at > HANDOFF_MAX_AGE_MS) return null
     return { handoff: pending.link.handoff, state: pending.link.state }
+  })
+
+  // Full screen (app/fullscreen.ts): whether the window is in it, and the way
+  // out, for the site's own "Exit full screen" button. Only the main window's
+  // own page, on an allowed origin; anything else gets false.
+  ipcMain.handle('window:is-full-screen', (event) => {
+    if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return false
+    if (!isOriginAllowed(event.senderFrame?.url, ALLOWED_ORIGINS)) return false
+    return mainWindow.isFullScreen()
+  })
+
+  ipcMain.handle('window:exit-full-screen', (event) => {
+    if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return false
+    if (!isOriginAllowed(event.senderFrame?.url, ALLOWED_ORIGINS)) return false
+    return fullScreenExit ? fullScreenExit.leave() : false
   })
 
   ipcMain.handle('presence:ping', () => {
