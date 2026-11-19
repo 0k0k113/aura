@@ -197,8 +197,8 @@ function createWindow(): void {
   // (File, Edit, View, Window, Help) in the system's light colours: a white
   // strip across the top of an all-black app. A dark theme makes Windows draw
   // the title bar dark; the menu bar is hidden below, its shortcuts (reload,
-  // zoom, full screen: F11) still work, and Esc leaves full screen too
-  // (app/fullscreen.ts). The site has no "system" theme
+  // zoom, full screen: F11) still work, and Esc leaves full screen too, once no
+  // text field has the cursor (app/fullscreen.ts). The site has no "system" theme
   // (enableSystem off), so the page itself does not change. macOS keeps its
   // own frame, as before.
   if (process.platform !== 'darwin') nativeTheme.themeSource = 'dark'
@@ -631,6 +631,16 @@ function setupIPC(): void {
     if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return false
     if (!isOriginAllowed(event.senderFrame?.url, ALLOWED_ORIGINS)) return false
     return fullScreenExit ? fullScreenExit.leave() : false
+  })
+
+  // Whether a text field on the page has the cursor (app/fullscreen.ts TYPING):
+  // while it does, Esc is the field's, not the way out of full screen. The
+  // preload says so on its own. Only the main window's own page, on an allowed
+  // origin, as above; anything but the boolean true counts as false.
+  ipcMain.on('window:typing', (event, typing: unknown) => {
+    if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return
+    if (!isOriginAllowed(event.senderFrame?.url, ALLOWED_ORIGINS)) return
+    fullScreenExit?.setTyping(typing === true)
   })
 
   // The window's buttons (app/titleBar.ts): the colours under them, 'dark' or

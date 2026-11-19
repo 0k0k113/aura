@@ -2,7 +2,15 @@ Discord Rich Presence for **unreleased.world**. Install it, leave it running,
 and whatever you play on the site shows up on your Discord profile — cover art,
 track, artist, elapsed time. Nothing shows while you're paused.
 
-## What's new in 1.0.13
+## What's new in 1.0.14
+
+**Esc clears the box you're typing in before it leaves full screen.** In
+full screen, Esc in a box you're typing in (the player's Search, a chat
+message) goes to the box first, the same as outside full screen, instead of
+throwing you out of full screen. Once you're out of the box, Esc gets you out
+of full screen like before, and F11 still works too.
+
+## In 1.0.13
 
 **No more separate title bar.** On Windows, minimize, maximize and close now
 sit in unreleased.world's own top bar, at the top right, the way Spotify does
