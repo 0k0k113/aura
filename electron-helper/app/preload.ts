@@ -678,6 +678,91 @@ const unrlWindowAPI = {
 
 contextBridge.exposeInMainWorld('unrlWindow', unrlWindowAPI)
 
+// ---------------------------------------------------------------------------
+// Esc in a text field, in full screen (1.0.14; app/fullscreen.ts tells the
+// story). Main takes a plain Esc while the window is full screen, to leave it;
+// while a text field has the cursor, that Esc is the field's instead (the full
+// player's Search box clears, then lets go of the cursor), and the next one,
+// with no field focused, leaves. So this side tells main ('window:typing', a
+// boolean and nothing else) each time that changes, and again at every
+// full-screen change it hears, since main forgets it on the way out. Only on
+// an allowed origin. Nothing is exposed to the page: unrlWindow is unchanged.
+//
+// A text field is what the site's own isEditableTarget
+// (components/player/playerHotkeys.ts) counts, less the inputs that are
+// buttons and switches: an input that takes typing, a textarea, a select,
+// anything editable (contenteditable with any value, the site's own
+// plaintext-only editor included) and role="textbox". Focus inside an open
+// shadow root is followed to the element that has it. A closed shadow root
+// hides that element, so its host is judged on its own (not a text field,
+// unless the host itself is editable) and Esc there leaves full screen, as in
+// 1.0.13: never the other way round, since an Esc that cannot leave full
+// screen is what this must never cause.
+// ---------------------------------------------------------------------------
+
+/** Inputs that are buttons and switches, not typing: Esc on them leaves full screen. */
+const NOT_TYPING_INPUTS = new Set(['button', 'checkbox', 'radio', 'range', 'submit', 'reset', 'image', 'file'])
+
+/** The element with the cursor, followed into open shadow roots; a closed one stops at its host. */
+function focusedElement(): Element | null {
+  let element: Element | null = document.activeElement
+  for (let depth = 0; element && depth < 32; depth++) {
+    const inner = element.shadowRoot?.activeElement
+    if (!inner) break
+    element = inner
+  }
+  return element
+}
+
+/** Something that takes typing, whose Esc is its own. */
+function isTextField(element: Element | null): boolean {
+  if (!element) return false
+  const tag = String(element.tagName).toUpperCase()
+  if (tag === 'INPUT') return !NOT_TYPING_INPUTS.has(String((element as HTMLInputElement).type).toLowerCase())
+  if (tag === 'TEXTAREA' || tag === 'SELECT') return true
+  if ((element as HTMLElement).isContentEditable === true) return true
+  return typeof element.getAttribute === 'function' && element.getAttribute('role') === 'textbox'
+}
+
+let typingSaid = false
+
+/** Tells main whether a text field has the cursor: when that changed, or regardless (`again`). */
+function sayTyping(again = false): void {
+  try {
+    if (typeof document === 'undefined' || !isCurrentOriginAllowed()) return
+    const typing = isTextField(focusedElement())
+    if (typing === typingSaid && !again) return
+    typingSaid = typing
+    ipcRenderer.send('window:typing', typing)
+  } catch (error) {
+    console.error('[Window] Could not tell main whether a text field has the cursor:', error)
+  }
+}
+
+try {
+  // The cursor arriving is decided at once; leaving, once it has landed, so
+  // Tab from one field to the next says nothing.
+  window.addEventListener('focusin', () => sayTyping(), true)
+  window.addEventListener('focusout', () => setTimeout(() => sayTyping(), 0), true)
+  // After each Esc the page hears, once the page has acted on it: a field that
+  // lost the cursor without a focusout (taken off the page with the cursor in
+  // it, say) is noticed then, so at worst one Esc is the page's before the
+  // next one leaves full screen.
+  window.addEventListener(
+    'keydown',
+    (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setTimeout(() => sayTyping(), 0)
+    },
+    true,
+  )
+} catch (error) {
+  // No way to watch the cursor: main never hears true, and Esc leaves full screen as in 1.0.13.
+  console.error('[Window] Could not watch for text fields:', error)
+}
+
+// Main forgets on the way out of full screen: say it again at every change.
+ipcRenderer.on('window:full-screen-changed', () => sayTyping(true))
+
 // Kept unconditional: one line at load, and it's the first thing to check when
 // someone reports "presence isn't showing up".
 console.log(
